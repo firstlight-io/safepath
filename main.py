@@ -13,6 +13,7 @@ from __future__ import annotations
 
 import logging
 import os
+import sys
 from typing import Any, Dict, List
 
 from fastapi import FastAPI, HTTPException, status
@@ -23,7 +24,6 @@ from pydantic import BaseModel, Field
 
 from engine import compute_routes
 
-# Configure logging
 logging.basicConfig(
     level=logging.INFO,
     format="[%(asctime)s] [%(levelname)s] [SafePath API] %(message)s",
@@ -36,7 +36,6 @@ app = FastAPI(
     version="1.0.0",
 )
 
-# Enable CORS for maximum client compatibility
 app.add_middleware(
     CORSMiddleware,
     allow_origins=["*"],
@@ -46,9 +45,6 @@ app.add_middleware(
 )
 
 
-# ==============================================================================
-# Pydantic Schemas
-# ==============================================================================
 class RouteRequest(BaseModel):
     start_lat: float = Field(
         ...,
@@ -116,9 +112,6 @@ class RouteResponse(BaseModel):
     )
 
 
-# ==============================================================================
-# API Routes
-# ==============================================================================
 @app.get("/api/health", tags=["System"])
 def health_check() -> Dict[str, str]:
     """Health check endpoint confirming API service status."""
@@ -135,10 +128,10 @@ def health_check() -> Dict[str, str]:
 def calculate_route_endpoint(payload: RouteRequest) -> RouteResponse:
     """
     Computes two pedestrian routes between Start and End coordinates:
-    
+
     1. **Route A (Standard Route)**: Shortest distance path via OSMnx pedestrian graph.
     2. **Route B (SafePath Route)**: Cost-penalized path detouring away from High-AQI hazard zones.
-    
+
     Returns the geometry for both routes, hazard zone locations, and comparative exposure metrics.
     """
     logger.info(
@@ -161,22 +154,28 @@ def calculate_route_endpoint(payload: RouteRequest) -> RouteResponse:
             detail=str(val_err),
         ) from val_err
 
+    except HTTPException:
+        raise
+
     except Exception as exc:
         logger.error(f"Routing computation failure: {exc}", exc_info=True)
         raise HTTPException(
             status_code=status.HTTP_500_INTERNAL_SERVER_ERROR,
-            detail=f"Routing calculation failed: {str(exc)}",
+            detail=(
+                "Routing engine could not complete the calculation. "
+                "This may be due to the Overpass API (OpenStreetMap data source) "
+                "being slow or unavailable — please try again in a few moments."
+            ),
         ) from exc
 
 
 # ==============================================================================
 # Static UI Mounting
 # ==============================================================================
-# Ensure static directory exists
-static_dir = os.path.join(os.path.dirname(__file__), "static")
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+static_dir = os.path.join(BASE_DIR, "static")
 os.makedirs(static_dir, exist_ok=True)
 
-# Mount /static directory for static asset delivery
 app.mount("/static", StaticFiles(directory=static_dir), name="static")
 
 
@@ -192,7 +191,26 @@ def serve_index() -> FileResponse:
     return FileResponse(index_file, media_type="text/html")
 
 
+@app.on_event("startup")
+async def on_startup() -> None:
+    """Log startup diagnostics — useful when debugging Render / PaaS deploys."""
+    logger.info("=" * 60)
+    logger.info("SafePath API Server starting up...")
+    logger.info(f"  Python:   {sys.version.split()[0]}")
+    logger.info(f"  Platform: {sys.platform}")
+    logger.info(f"  CWD:      {os.getcwd()}")
+    logger.info(f"  BASE_DIR: {BASE_DIR}")
+    logger.info(f"  STATIC:   {static_dir} (exists={os.path.isdir(static_dir)})")
+    port = os.environ.get("PORT", "8000")
+    host = os.environ.get("HOST", "0.0.0.0")
+    logger.info(f"  Bind:     {host}:{port}")
+    logger.info("=" * 60)
+
+
 if __name__ == "__main__":
     import uvicorn
 
-    uvicorn.run("main:app", host="0.0.0.0", port=8000, reload=True)
+    host = os.environ.get("HOST", "0.0.0.0")
+    port = int(os.environ.get("PORT", "8000"))
+    logger.info(f"Launching uvicorn on {host}:{port}")
+    uvicorn.run("main:app", host=host, port=port, reload=False)

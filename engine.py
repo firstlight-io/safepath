@@ -18,6 +18,8 @@ from __future__ import annotations
 
 import logging
 import math
+import os
+import time
 from typing import Any, Dict, List, Tuple
 
 import networkx as nx
@@ -25,7 +27,6 @@ import osmnx as ox
 import osmnx._http
 from shapely.geometry import LineString
 
-# Configure logger
 logger = logging.getLogger("safepath.engine")
 if not logger.handlers:
     handler = logging.StreamHandler()
@@ -39,17 +40,21 @@ logger.setLevel(logging.INFO)
 # ==============================================================================
 # OSMnx & Overpass Network Configuration
 # ==============================================================================
-# Patch OSMnx's internal DNS mutation helper to allow standard dual-stack (IPv6/IPv4)
-# resolution. This prevents connection timeouts on environments with IPv6-preferred routing.
 osmnx._http._config_dns = lambda url: None
 
-# Configure polite OSMnx headers & caching to adhere to OSM acceptable use policy
+BASE_DIR = os.path.dirname(os.path.abspath(__file__))
+CACHE_DIR = os.path.join(BASE_DIR, "cache")
+os.makedirs(CACHE_DIR, exist_ok=True)
+logger.info(f"OSMnx cache directory: {CACHE_DIR}")
+
 ox.settings.http_user_agent = "SafePath-Routing-Engine/1.0 (academic-research@safepath.local)"
 ox.settings.http_referer = "https://safepath.local"
 ox.settings.use_cache = True
-ox.settings.cache_folder = "cache"
+ox.settings.cache_folder = CACHE_DIR
 ox.settings.overpass_rate_limit = False
 ox.settings.log_console = False
+ox.settings.timeout = 60
+ox.settings.requests_kwargs = {"timeout": 60}
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -184,14 +189,29 @@ def fetch_pedestrian_graph(
     # OSMnx 2.x bbox format is (left, bottom, right, top) -> (min_lon, min_lat, max_lon, max_lat)
     bbox = (min_lon, min_lat, max_lon, max_lat)
     logger.info(f"Downloading walk network for bounding box: {bbox}")
+    t0 = time.time()
 
-    try:
-        G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
-    except Exception as exc:
-        logger.error(f"Failed to download OSM graph for bbox {bbox}: {exc}")
+    max_retries = 3
+    last_exc = None
+    for attempt in range(1, max_retries + 1):
+        try:
+            G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
+            elapsed = time.time() - t0
+            logger.info(f"Street network downloaded in {elapsed:.1f}s — {len(G)} nodes, {G.number_of_edges()} edges")
+            break
+        except Exception as exc:
+            last_exc = exc
+            logger.warning(f"Overpass download attempt {attempt}/{max_retries} failed: {exc}")
+            if attempt < max_retries:
+                wait_s = attempt * 4
+                logger.info(f"Retrying in {wait_s}s...")
+                time.sleep(wait_s)
+            else:
+                logger.error(f"All {max_retries} Overpass download attempts failed")
+    else:
         raise ValueError(
-            f"Unable to retrieve street network data for coordinates: {exc}"
-        ) from exc
+            f"Unable to retrieve street network data for coordinates after {max_retries} attempts: {last_exc}"
+        )
 
     if len(G) == 0:
         raise ValueError("Retrieved street network contains no walkable segments.")
@@ -385,6 +405,8 @@ def compute_routes(
     - Dual pathfinding: Standard (Dijkstra on base length) vs SafePath (Dijkstra on safepath_weight).
     - Metrics evaluation and response formatting.
     """
+    t_start = time.time()
+
     # Step 1: Validate coordinate sanity
     trip_distance_m = haversine_distance(start_lat, start_lon, end_lat, end_lon)
     if trip_distance_m < 20.0:
@@ -394,8 +416,11 @@ def compute_routes(
             "Trip distance exceeds 6 km. Please choose points within a walkable university campus, park, or urban neighborhood (≤ 6 km)."
         )
 
+    logger.info(
+        f"Initiating SafePath routing from ({start_lat}, {start_lon}) to ({end_lat}, {end_lon}) | trip={trip_distance_m:.0f}m"
+    )
+
     # Step 2: Download street network graph
-    logger.info(f"Initiating SafePath routing from ({start_lat}, {start_lon}) to ({end_lat}, {end_lon})")
     G = fetch_pedestrian_graph(start_lat, start_lon, end_lat, end_lon)
 
     # Step 3: Generate 2 or 3 High-AQI Hazard Zones along the corridor
@@ -449,8 +474,9 @@ def compute_routes(
     standard_metrics["exposure"] = "Critical (AQI 250+)"
     safepath_metrics["exposure"] = "Low (AQI 45)"
 
+    elapsed_total = time.time() - t_start
     logger.info(
-        f"Route Calculation Complete: "
+        f"Route Calculation Complete ({elapsed_total:.1f}s): "
         f"Standard={standard_metrics['distance_km']}km ({standard_metrics['exposure']}), "
         f"SafePath={safepath_metrics['distance_km']}km ({safepath_metrics['exposure']})"
     )
