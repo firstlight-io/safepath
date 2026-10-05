@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import socket
+from contextlib import contextmanager
 from typing import Any, Dict, List, Tuple
 
 import networkx as nx
@@ -56,6 +57,31 @@ ox.settings.use_cache = True
 ox.settings.cache_folder = "cache"
 ox.settings.overpass_rate_limit = False
 ox.settings.log_console = False
+
+FALLBACK_OVERPASS_API_URLS = (
+    "https://overpass.kumi.systems/api",
+    "https://overpass.private.coffee/api",
+)
+
+
+@contextmanager
+def force_ipv4_resolution() -> Any:
+    """
+    Temporarily force DNS resolution to IPv4 to avoid IPv6-only routing failures
+    in constrained cloud/container networking environments.
+    """
+    original_getaddrinfo = socket.getaddrinfo
+
+    def ipv4_getaddrinfo(host: str, port: int, family: int = 0, type: int = 0, proto: int = 0, flags: int = 0) -> Any:
+        if family in (0, socket.AF_UNSPEC):
+            family = socket.AF_INET
+        return original_getaddrinfo(host, port, family, type, proto, flags)
+
+    socket.getaddrinfo = ipv4_getaddrinfo
+    try:
+        yield
+    finally:
+        socket.getaddrinfo = original_getaddrinfo
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -191,18 +217,35 @@ def fetch_pedestrian_graph(
     bbox = (min_lon, min_lat, max_lon, max_lat)
     logger.info(f"Downloading walk network for bounding box: {bbox}")
 
+    original_overpass_url = getattr(ox.settings, "overpass_url", "https://overpass-api.de/api")
+    endpoint_candidates: List[str] = [original_overpass_url]
+    endpoint_candidates.extend(
+        url for url in FALLBACK_OVERPASS_API_URLS if url not in endpoint_candidates
+    )
+    attempt_errors: List[str] = []
+
     try:
-        G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
-    except Exception as exc:
-        logger.error(f"Failed to download OSM graph for bbox {bbox}: {exc}")
-        raise ValueError(
-            f"Unable to retrieve street network data for coordinates: {exc}"
-        ) from exc
+        for endpoint in endpoint_candidates:
+            try:
+                logger.info(f"Attempting Overpass endpoint: {endpoint}")
+                ox.settings.overpass_url = endpoint
+                with force_ipv4_resolution():
+                    G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
 
-    if len(G) == 0:
-        raise ValueError("Retrieved street network contains no walkable segments.")
+                if len(G) == 0:
+                    raise ValueError("Retrieved street network contains no walkable segments.")
 
-    return G
+                return G
+            except Exception as exc:
+                attempt_errors.append(f"{endpoint}: {exc}")
+                logger.warning(f"Overpass request failed via {endpoint}: {exc}")
+    finally:
+        ox.settings.overpass_url = original_overpass_url
+
+    raise ValueError(
+        "Unable to retrieve street network data for coordinates after trying multiple "
+        f"Overpass endpoints. Errors: {' | '.join(attempt_errors)}"
+    )
 
 
 def apply_algorithmic_weighting(
