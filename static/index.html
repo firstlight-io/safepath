@@ -2,480 +2,914 @@
 <html lang="en">
 <head>
   <meta charset="UTF-8">
-  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0, viewport-fit=cover">
+  <meta name="theme-color" content="#0B0F19">
   <title>SafePath — Heuristic Pedestrian Routing Engine</title>
 
-  <!-- Leaflet CSS -->
-  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
-  <!-- Google Fonts -->
   <link rel="preconnect" href="https://fonts.googleapis.com">
   <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
-  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
 
   <style>
+    /* ============================================================
+       SafePath — Premium Dark Design System
+       Palette: Deep Slate #0B0F19 · Neon Green #39FF14
+       ============================================================ */
     :root {
-      --bg-dark: #0a0e17;
-      --card-bg: rgba(13, 20, 36, 0.88);
-      --card-border: rgba(255, 255, 255, 0.1);
-      --card-shadow: 0 20px 45px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255,255,255,0.12);
-      --text-main: #f1f5f9;
-      --text-muted: #94a3b8;
-      --text-dim: #64748b;
-      --accent-green: #10b981;
-      --accent-green-neon: #00ff88;
-      --accent-green-glow: rgba(0, 255, 136, 0.35);
-      --accent-red: #ef4444;
-      --accent-blue: #38bdf8;
-      --accent-indigo: #6366f1;
-      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
-      --font-mono: 'JetBrains Mono', monospace;
+      --bg-app:            #0B0F19;
+      --bg-app-2:          #070A12;
+      --surface-glass:     rgba(11, 15, 25, 0.72);
+      --surface-elev:      rgba(17, 22, 36, 0.92);
+      --surface-elev-2:    rgba(22, 28, 45, 0.95);
+      --stroke:            rgba(255, 255, 255, 0.08);
+      --stroke-strong:     rgba(255, 255, 255, 0.14);
+      --text-primary:      #F8FAFC;
+      --text-secondary:    #94A3B8;
+      --text-tertiary:     #64748B;
+      --text-dim:          #475569;
+
+      --accent-green:      #39FF14;
+      --accent-green-soft: rgba(57, 255, 20, 0.14);
+      --accent-green-glow: rgba(57, 255, 20, 0.35);
+      --accent-green-500:  #2BE610;
+      --accent-blue:       #60A5FA;
+      --accent-indigo:     #818CF8;
+      --accent-white:      #FFFFFF;
+      --danger-500:        #EF4444;
+      --danger-400:        #F87171;
+      --danger-soft:       rgba(239, 68, 68, 0.16);
+      --danger-glow:       rgba(239, 68, 68, 0.40);
+
+      --radius-sm:         8px;
+      --radius-md:         12px;
+      --radius-lg:         16px;
+      --radius-xl:         20px;
+
+      --font-sans: 'Inter', ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', sans-serif;
+
+      --shadow-glass:
+        0 1px 0 rgba(255,255,255,0.04) inset,
+        0 12px 38px rgba(0, 0, 0, 0.60),
+        0 1px 1px rgba(0,0,0,0.50);
+      --shadow-button-green:
+        0 4px 15px rgba(57, 255, 20, 0.22),
+        0 1px 0 rgba(255,255,255,0.08) inset;
     }
 
     *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
 
-    body, html {
+    html, body {
       width: 100%; height: 100%;
       overflow: hidden;
       font-family: var(--font-sans);
-      background: var(--bg-dark);
-      color: var(--text-main);
+      font-feature-settings: "ss01", "cv11", "cv01";
+      -webkit-font-smoothing: antialiased;
+      -moz-osx-font-smoothing: grayscale;
+      background:
+        radial-gradient(1200px 800px at 15% 10%, rgba(57,255,20,0.04) 0%, transparent 60%),
+        radial-gradient(900px 700px at 85% 90%, rgba(96,165,250,0.035) 0%, transparent 60%),
+        var(--bg-app);
+      color: var(--text-primary);
+      letter-spacing: -0.011em;
     }
 
+    /* ============================================================
+       MAP
+       ============================================================ */
     #map {
-      width: 100%; height: 100%;
-      position: absolute; top: 0; left: 0; z-index: 1;
-      background: #090d16;
+      position: absolute; inset: 0;
+      z-index: 1;
+      background: #080C14;
     }
 
-    /* ── Control Panel ── */
-    .control-panel {
+    /* Subtle vignette to pull focus toward the map edges */
+    #map::after {
+      content: "";
+      position: absolute; inset: 0; pointer-events: none; z-index: 400;
+      background:
+        radial-gradient(ellipse at center, transparent 55%, rgba(0,0,0,0.35) 100%);
+    }
+
+    /* ============================================================
+       TOP BAR — Brand header
+       ============================================================ */
+    .topbar {
       position: absolute;
-      top: 18px; left: 18px;
-      width: 400px;
-      max-width: calc(100vw - 36px);
-      max-height: calc(100vh - 36px);
-      background: var(--card-bg);
-      backdrop-filter: blur(18px);
-      -webkit-backdrop-filter: blur(18px);
-      border: 1px solid var(--card-border);
-      border-radius: 20px;
-      padding: 20px;
-      box-shadow: var(--card-shadow);
-      z-index: 1000;
-      overflow-y: auto;
+      top: 0; left: 0; right: 0;
+      z-index: 999;
       display: flex;
-      flex-direction: column;
-      gap: 16px;
-      scrollbar-width: thin;
-      scrollbar-color: rgba(255,255,255,0.15) transparent;
-      animation: fadeSlide 0.35s ease-out;
+      justify-content: space-between;
+      align-items: center;
+      padding: 14px 20px;
+      pointer-events: none;
     }
 
-    @keyframes fadeSlide {
-      from { opacity: 0; transform: translateY(-8px); }
-      to   { opacity: 1; transform: translateY(0); }
+    .brand {
+      display: flex; align-items: center; gap: 10px;
+      padding: 8px 14px;
+      border-radius: 999px;
+      background: var(--surface-glass);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      box-shadow: var(--shadow-glass);
+      pointer-events: auto;
+    }
+    .brand-mark {
+      width: 22px; height: 22px;
+      display: grid; place-items: center;
+    }
+    .brand-name {
+      font-size: 13.5px; font-weight: 700;
+      letter-spacing: -0.015em;
+    }
+    .brand-tag {
+      font-size: 10px; font-weight: 600;
+      letter-spacing: 0.08em; text-transform: uppercase;
+      color: var(--accent-green);
+      padding: 3px 7px;
+      border-radius: 999px;
+      background: var(--accent-green-soft);
+      border: 1px solid rgba(57,255,20,0.25);
     }
 
-    /* ── Header ── */
-    .header { border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px; }
-    .brand-row {
-      display: flex; align-items: center; justify-content: space-between;
+    .topbar-right {
+      display: flex; align-items: center; gap: 8px;
+      pointer-events: auto;
     }
-    .brand-title {
-      font-size: 21px; font-weight: 800; letter-spacing: -0.4px;
-      display: flex; align-items: center; gap: 8px; color: #fff;
-    }
-    .brand-badge {
-      font-size: 10px; font-weight: 700; text-transform: uppercase;
-      padding: 3px 8px; border-radius: 6px;
-      background: rgba(16,185,129,0.15);
-      border: 1px solid rgba(16,185,129,0.35);
-      color: var(--accent-green-neon); letter-spacing: 0.5px;
-    }
-    .brand-tagline { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
-
-    /* ── Section Label ── */
-    .section-label {
-      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.6px; color: var(--text-dim);
-    }
-
-    /* ── Presets ── */
-    .preset-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
-    .preset-btn {
-      background: rgba(255,255,255,0.06);
-      border: 1px solid rgba(255,255,255,0.1);
-      color: var(--text-muted);
+    .env-chip {
+      display: inline-flex; align-items: center; gap: 6px;
+      padding: 7px 12px;
       font-size: 11px; font-weight: 500;
-      padding: 5px 10px; border-radius: 8px;
-      cursor: pointer; transition: all 0.2s;
+      color: var(--text-secondary);
+      border-radius: 999px;
+      background: var(--surface-glass);
+      border: 1px solid var(--stroke);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+    }
+    .env-dot {
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--accent-green);
+      box-shadow: 0 0 10px var(--accent-green-glow);
+    }
+
+    /* ============================================================
+       CONTROL PANEL — Glassmorphism (Left Side, Desktop)
+       ============================================================ */
+    .panel-wrapper {
+      position: absolute;
+      top: 72px; left: 20px;
+      width: 400px;
+      max-width: calc(100vw - 40px);
+      max-height: calc(100vh - 100px - env(safe-area-inset-bottom));
+      z-index: 950;
+      pointer-events: none;
+    }
+    .control-panel {
+      position: relative;
+      width: 100%;
+      max-height: inherit;
+      display: flex; flex-direction: column;
+      gap: 18px;
+      padding: 22px;
+      background: var(--surface-glass);
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-xl);
+      backdrop-filter: blur(16px);
+      -webkit-backdrop-filter: blur(16px);
+      box-shadow: var(--shadow-glass);
+      overflow-y: auto;
+      overflow-x: hidden;
+      pointer-events: auto;
+      animation: panelIn 0.38s cubic-bezier(.2,.8,.2,1);
+    }
+    @keyframes panelIn {
+      from { opacity: 0; transform: translateY(-6px) scale(0.985); }
+      to   { opacity: 1; transform: translateY(0) scale(1); }
+    }
+
+    /* Narrow scrollbar */
+    .control-panel { scrollbar-width: thin; scrollbar-color: rgba(255,255,255,0.14) transparent; }
+    .control-panel::-webkit-scrollbar { width: 6px; }
+    .control-panel::-webkit-scrollbar-thumb {
+      background: rgba(255,255,255,0.12);
+      border-radius: 999px;
+    }
+
+    /* Section label */
+    .eyebrow {
+      font-size: 10.5px; font-weight: 600;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--text-tertiary);
+      margin-bottom: 8px;
+    }
+
+    /* ============================================================
+       PRESETS
+       ============================================================ */
+    .preset-pills {
+      display: flex; gap: 6px; flex-wrap: wrap;
+    }
+    .preset-btn {
+      appearance: none; border: 1px solid var(--stroke);
+      background: rgba(255,255,255,0.03);
+      color: var(--text-secondary);
+      font-family: var(--font-sans);
+      font-size: 11.5px; font-weight: 500;
+      letter-spacing: -0.01em;
+      padding: 6px 11px;
+      border-radius: 999px;
+      cursor: pointer;
+      transition: background 0.18s ease, color 0.18s ease, border-color 0.18s ease, transform 0.06s ease;
     }
     .preset-btn:hover {
-      background: rgba(255,255,255,0.14);
-      color: #fff; border-color: rgba(255,255,255,0.25);
+      background: rgba(255,255,255,0.07);
+      color: var(--text-primary);
+      border-color: var(--stroke-strong);
     }
+    .preset-btn:active { transform: translateY(1px); }
 
-    /* ── Search Box (Uber-style) ── */
-    .search-group { display: flex; flex-direction: column; gap: 8px; }
-
-    .search-field {
-      position: relative;
-    }
-
+    /* ============================================================
+       SEARCH FIELDS
+       ============================================================ */
+    .search-group { display: flex; flex-direction: column; gap: 14px; }
+    .search-field { position: relative; }
     .search-field-label {
-      display: flex; align-items: center; gap: 6px;
-      font-size: 10.5px; font-weight: 600; color: var(--text-dim);
-      text-transform: uppercase; letter-spacing: 0.5px;
-      margin-bottom: 5px;
+      display: flex; align-items: center; gap: 8px;
+      font-size: 11px; font-weight: 600;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      color: var(--text-tertiary);
+      margin-bottom: 7px;
     }
-
     .pin-dot {
-      width: 9px; height: 9px; border-radius: 50%;
+      width: 8px; height: 8px; border-radius: 50%;
       flex-shrink: 0;
     }
-    .pin-dot.start { background: var(--accent-green-neon); box-shadow: 0 0 8px var(--accent-green-neon); }
-    .pin-dot.end   { background: var(--accent-blue);       box-shadow: 0 0 8px var(--accent-blue); }
-
-    .search-input-wrap {
-      position: relative;
-      display: flex; align-items: center;
+    .pin-dot.start {
+      background: var(--accent-green);
+      box-shadow: 0 0 12px var(--accent-green-glow);
+    }
+    .pin-dot.end {
+      background: #FFFFFF;
+      box-shadow: 0 0 12px rgba(255,255,255,0.35);
     }
 
+    .search-input-wrap { position: relative; }
+
     .search-icon {
-      position: absolute; left: 10px;
-      color: var(--text-dim); pointer-events: none;
+      position: absolute;
+      top: 50%; left: 13px; transform: translateY(-50%);
+      color: var(--text-tertiary);
+      pointer-events: none;
     }
 
     .search-input {
       width: 100%;
-      background: rgba(0,0,0,0.35);
-      border: 1px solid rgba(255,255,255,0.1);
-      border-radius: 10px;
-      padding: 9px 36px 9px 34px;
-      color: #fff;
+      background:
+        linear-gradient(180deg, rgba(0,0,0,0.28) 0%, rgba(0,0,0,0.16) 100%);
+      border: 0;
+      border-radius: var(--radius-md);
+      padding: 12px 38px 12px 38px;
+      color: var(--text-primary);
       font-family: var(--font-sans);
-      font-size: 13px;
+      font-size: 13.5px; font-weight: 400;
+      letter-spacing: -0.01em;
       outline: none;
-      transition: border-color 0.15s, background 0.15s;
+      box-shadow:
+        0 1px 0 rgba(255,255,255,0.035) inset,
+        0 1px 0 rgba(0,0,0,0.30);
+      border-bottom: 1px solid rgba(255,255,255,0.07);
+      transition: border-color 0.22s ease, box-shadow 0.22s ease, background 0.22s ease;
     }
-    .search-input::placeholder { color: var(--text-dim); }
+    .search-input::placeholder {
+      color: var(--text-dim);
+      font-weight: 400;
+    }
     .search-input:focus {
-      border-color: var(--accent-indigo);
-      background: rgba(255,255,255,0.07);
+      border-bottom-color: var(--accent-green);
+      box-shadow:
+        0 0 0 1px rgba(57,255,20,0.18),
+        0 10px 32px -18px var(--accent-green-glow),
+        0 1px 0 rgba(0,0,0,0.30);
+      background:
+        linear-gradient(180deg, rgba(57,255,20,0.05) 0%, rgba(0,0,0,0.16) 100%);
     }
 
     .clear-btn {
-      position: absolute; right: 8px;
-      background: none; border: none;
-      color: var(--text-dim); cursor: pointer;
-      font-size: 16px; line-height: 1;
-      padding: 2px 4px; border-radius: 4px;
-      transition: color 0.15s;
-      display: none;
+      position: absolute; top: 50%; right: 10px;
+      transform: translateY(-50%);
+      appearance: none; border: 0; background: transparent;
+      color: var(--text-tertiary);
+      width: 22px; height: 22px;
+      display: none; align-items: center; justify-content: center;
+      border-radius: 6px;
+      cursor: pointer;
+      transition: color 0.15s ease, background 0.15s ease;
     }
-    .clear-btn:hover { color: #fff; }
+    .clear-btn:hover { color: var(--text-primary); background: rgba(255,255,255,0.06); }
 
-    /* ── Autocomplete Dropdown ── */
+    /* ============================================================
+       AUTOCOMPLETE DROPDOWN
+       ============================================================ */
     .autocomplete-dropdown {
       position: absolute;
-      top: calc(100% + 4px);
+      top: calc(100% + 6px);
       left: 0; right: 0;
-      background: rgba(10, 15, 28, 0.97);
-      border: 1px solid rgba(255,255,255,0.12);
-      border-radius: 12px;
-      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      background: var(--surface-elev);
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-md);
+      backdrop-filter: blur(12px);
+      -webkit-backdrop-filter: blur(12px);
+      box-shadow: 0 22px 50px rgba(0,0,0,0.55);
       z-index: 2000;
       overflow: hidden;
       display: none;
     }
-
     .autocomplete-item {
-      padding: 10px 14px;
+      padding: 10px 13px;
       cursor: pointer;
       display: flex; gap: 10px; align-items: flex-start;
-      border-bottom: 1px solid rgba(255,255,255,0.05);
-      transition: background 0.12s;
+      border-bottom: 1px solid rgba(255,255,255,0.04);
+      transition: background 0.12s ease;
     }
     .autocomplete-item:last-child { border-bottom: none; }
-    .autocomplete-item:hover { background: rgba(255,255,255,0.08); }
-
-    .autocomplete-item-icon { 
-      flex-shrink: 0; margin-top: 1px;
-      color: var(--text-dim);
-    }
+    .autocomplete-item:hover { background: rgba(255,255,255,0.05); }
+    .autocomplete-item-icon { flex-shrink: 0; margin-top: 2px; color: var(--text-tertiary); }
     .autocomplete-item-text { display: flex; flex-direction: column; gap: 1px; }
-    .autocomplete-item-main { font-size: 13px; font-weight: 500; color: #fff; }
-    .autocomplete-item-sub  { font-size: 11px; color: var(--text-dim); }
+    .autocomplete-item-main { font-size: 13px; font-weight: 500; color: var(--text-primary); letter-spacing: -0.01em; }
+    .autocomplete-item-sub  { font-size: 11.5px; color: var(--text-tertiary); }
 
     .autocomplete-loading {
       padding: 12px 14px; font-size: 12px;
-      color: var(--text-dim); display: flex; align-items: center; gap: 8px;
+      color: var(--text-secondary); display: flex; align-items: center; gap: 8px;
     }
     .mini-spinner {
       width: 12px; height: 12px;
-      border: 2px solid rgba(255,255,255,0.1);
-      border-top-color: var(--accent-blue);
+      border: 2px solid rgba(255,255,255,0.10);
+      border-top-color: var(--accent-indigo);
       border-radius: 50%;
       animation: spin 0.7s linear infinite;
     }
     @keyframes spin { to { transform: rotate(360deg); } }
 
-    /* Map-click hint strip */
+    /* ============================================================
+       MAP CLICK HINT STRIP
+       ============================================================ */
     .map-click-hint {
-      font-size: 11px; color: var(--text-dim);
-      display: flex; align-items: center; gap: 6px;
-      background: rgba(255,255,255,0.03);
-      border: 1px dashed rgba(255,255,255,0.1);
-      border-radius: 8px; padding: 7px 10px;
+      font-size: 11.5px; color: var(--text-secondary);
+      display: flex; align-items: center; gap: 8px;
+      background: rgba(255,255,255,0.02);
+      border: 1px dashed rgba(255,255,255,0.09);
+      border-radius: var(--radius-sm);
+      padding: 8px 11px;
+      line-height: 1.45;
     }
+    .map-click-hint b { color: var(--text-primary); font-weight: 600; }
 
-    /* ── Calculate Button ── */
+    /* ============================================================
+       CALCULATE BUTTON (Premium)
+       ============================================================ */
     .calculate-btn {
-      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
-      color: #fff; border: none; border-radius: 12px;
-      padding: 13px 18px; font-size: 14px; font-weight: 700;
-      cursor: pointer; display: flex; align-items: center; justify-content: center;
-      gap: 8px; box-shadow: 0 4px 20px rgba(16,185,129,0.35);
-      transition: all 0.2s;
+      appearance: none;
+      position: relative;
+      display: flex; align-items: center; justify-content: center; gap: 9px;
+      width: 100%;
+      padding: 13px 18px;
+      font-family: var(--font-sans);
+      font-size: 14px; font-weight: 700;
+      letter-spacing: -0.01em;
+      color: #041407;
+      background:
+        linear-gradient(180deg, #56FF2C 0%, var(--accent-green-500) 55%, #22C40A 100%);
+      border: 1px solid rgba(57,255,20,0.65);
+      border-radius: var(--radius-md);
+      cursor: pointer;
+      box-shadow: var(--shadow-button-green);
+      transition:
+        box-shadow 0.18s ease,
+        filter 0.18s ease,
+        transform 0.06s ease;
+    }
+    .calculate-btn::after {
+      content: "";
+      position: absolute; inset: 0;
+      border-radius: inherit;
+      background: linear-gradient(180deg, rgba(255,255,255,0.25), rgba(255,255,255,0));
+      mix-blend-mode: overlay;
+      pointer-events: none;
+      opacity: 0.6;
     }
     .calculate-btn:hover:not(:disabled) {
-      transform: translateY(-1px);
-      box-shadow: 0 6px 24px rgba(16,185,129,0.5);
+      filter: brightness(1.05);
+      box-shadow:
+        0 6px 22px rgba(57, 255, 20, 0.30),
+        0 1px 0 rgba(255,255,255,0.10) inset;
+    }
+    .calculate-btn:active:not(:disabled) {
+      transform: translateY(1px) scale(0.995);
+      filter: brightness(0.97);
     }
     .calculate-btn:disabled {
-      background: rgba(255,255,255,0.1); color: var(--text-dim);
-      cursor: not-allowed; box-shadow: none; transform: none;
+      color: var(--text-tertiary);
+      background: rgba(255,255,255,0.05);
+      border-color: var(--stroke);
+      box-shadow: none;
+      cursor: not-allowed;
     }
+    .calculate-btn:disabled::after { display: none; }
     .spinner {
-      width: 15px; height: 15px;
-      border: 2px solid rgba(255,255,255,0.25);
-      border-top-color: #fff;
-      border-radius: 50%; animation: spin 0.8s linear infinite;
+      width: 14px; height: 14px;
+      border: 2px solid rgba(4,20,7,0.25);
+      border-top-color: #041407;
+      border-radius: 50%;
+      animation: spin 0.75s linear infinite;
     }
 
-    /* ── Error banner ── */
+    /* ============================================================
+       ERROR BANNER
+       ============================================================ */
     .alert-banner {
-      background: rgba(239,68,68,0.12);
-      border: 1px solid rgba(239,68,68,0.3);
-      color: #fca5a5; font-size: 12px;
-      border-radius: 8px; padding: 8px 12px;
       display: none;
+      padding: 10px 12px;
+      font-size: 12px; line-height: 1.45;
+      color: #FECACA;
+      background: linear-gradient(180deg, rgba(239,68,68,0.12), rgba(239,68,68,0.06));
+      border: 1px solid rgba(239,68,68,0.32);
+      border-radius: var(--radius-sm);
     }
 
-    /* ── Metrics output ── */
+    /* ============================================================
+       OUTPUT SECTION (Wow factor stat cards)
+       ============================================================ */
     .output-section {
       display: flex; flex-direction: column; gap: 10px;
-      border-top: 1px solid rgba(255,255,255,0.07);
       padding-top: 14px;
+      border-top: 1px solid rgba(255,255,255,0.06);
     }
     .output-header {
       display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 2px;
     }
+
+    .status-tag {
+      display: inline-flex; align-items: center; gap: 6px;
+      font-size: 11px; font-weight: 500;
+      color: var(--text-secondary);
+    }
+    .status-tag::before {
+      content: "";
+      width: 6px; height: 6px; border-radius: 50%;
+      background: var(--text-tertiary);
+    }
+    .status-tag.ready::before   { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green-glow); }
+    .status-tag.loading::before { background: var(--accent-indigo); box-shadow: 0 0 8px rgba(129,140,248,0.5); animation: pulse 1.2s ease-in-out infinite; }
+    .status-tag.error::before   { background: var(--danger-500); box-shadow: 0 0 8px var(--danger-glow); }
+    .status-tag.done::before    { background: var(--accent-green); box-shadow: 0 0 8px var(--accent-green-glow); }
+    @keyframes pulse { 0%,100%{opacity:1} 50%{opacity:0.3} }
+
     .metric-card {
-      border-radius: 11px; padding: 11px 13px;
-      border: 1px solid rgba(255,255,255,0.06);
-      background: rgba(0,0,0,0.3);
+      position: relative;
+      border-radius: var(--radius-md);
+      padding: 14px 14px 13px;
+      background: linear-gradient(180deg, rgba(255,255,255,0.04) 0%, rgba(0,0,0,0.10) 100%);
+      border: 1px solid rgba(255,255,255,0.07);
+      overflow: hidden;
     }
+
     .metric-card.safepath-card {
-      border-left: 4px solid var(--accent-green-neon);
-      background: linear-gradient(90deg, rgba(0,255,136,0.07) 0%, rgba(0,0,0,0.28) 100%);
+      border: 1px solid rgba(57,255,20,0.22);
+      background:
+        radial-gradient(120% 100% at 0% 0%, rgba(57,255,20,0.12) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(22,28,45,0.98) 0%, rgba(13,18,31,0.98) 100%);
     }
     .metric-card.standard-card {
-      border-left: 4px solid var(--accent-red);
-      background: linear-gradient(90deg, rgba(239,68,68,0.07) 0%, rgba(0,0,0,0.28) 100%);
+      border: 1px solid rgba(239,68,68,0.22);
+      background:
+        radial-gradient(120% 100% at 0% 0%, rgba(239,68,68,0.10) 0%, transparent 55%),
+        linear-gradient(180deg, rgba(22,28,45,0.98) 0%, rgba(13,18,31,0.98) 100%);
     }
+
     .metric-title-row {
-      display: flex; justify-content: space-between; align-items: center;
-      margin-bottom: 4px;
+      display: flex; align-items: center; justify-content: space-between;
+      margin-bottom: 9px;
     }
-    .metric-name { font-size: 12.5px; font-weight: 700; }
-    .metric-pill {
+    .metric-name {
+      font-size: 12.5px; font-weight: 700;
+      letter-spacing: -0.005em;
+    }
+    .safepath-text { color: var(--accent-green); font-weight: 600; }
+    .standard-text { color: var(--danger-400); font-weight: 600; }
+
+    .aqi-pill {
+      display: inline-flex; align-items: center; gap: 5px;
       font-size: 9.5px; font-weight: 700;
-      padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
+      letter-spacing: 0.06em; text-transform: uppercase;
+      padding: 3px 8px;
+      border-radius: 999px;
     }
-    .safepath-text { color: var(--accent-green-neon); font-weight: 600; }
-    .standard-text { color: var(--accent-red); font-weight: 600; }
-    .metric-data-line { font-size: 12.5px; font-family: var(--font-mono); }
+    .aqi-pill.good {
+      color: var(--accent-green);
+      background: var(--accent-green-soft);
+      border: 1px solid rgba(57,255,20,0.30);
+      box-shadow: 0 0 12px -4px var(--accent-green-glow);
+    }
+    .aqi-pill.bad {
+      color: #FECACA;
+      background: var(--danger-soft);
+      border: 1px solid rgba(239,68,68,0.38);
+      box-shadow: 0 0 12px -4px var(--danger-glow);
+    }
+    .aqi-dot {
+      width: 5px; height: 5px; border-radius: 50%;
+    }
+    .aqi-pill.good .aqi-dot { background: var(--accent-green); box-shadow: 0 0 5px var(--accent-green-glow); }
+    .aqi-pill.bad  .aqi-dot { background: var(--danger-400); box-shadow: 0 0 5px var(--danger-glow); }
+
+    .metric-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 10px 14px;
+      margin-bottom: 10px;
+    }
+    .metric-cell { display: flex; flex-direction: column; gap: 2px; }
+    .metric-cell-label {
+      font-size: 10px; font-weight: 500;
+      letter-spacing: 0.05em; text-transform: uppercase;
+      color: var(--text-tertiary);
+    }
+    .metric-cell-value {
+      font-family: 'Inter', var(--font-sans);
+      font-size: 15px; font-weight: 700;
+      letter-spacing: -0.02em;
+      color: var(--text-primary);
+      font-variant-numeric: tabular-nums;
+    }
+
+    .exposure-bar {
+      position: relative;
+      height: 6px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.06);
+      overflow: hidden;
+    }
+    .exposure-bar-fill {
+      position: absolute; top: 0; left: 0; height: 100%;
+      border-radius: inherit;
+      transition: width 0.55s cubic-bezier(.2,.8,.2,1);
+    }
+    .metric-card.safepath-card .exposure-bar-fill {
+      background: linear-gradient(90deg, rgba(57,255,20,0.25), var(--accent-green));
+      box-shadow: 0 0 10px -2px var(--accent-green-glow);
+    }
+    .metric-card.standard-card .exposure-bar-fill {
+      background: linear-gradient(90deg, rgba(239,68,68,0.30), var(--danger-400));
+      box-shadow: 0 0 10px -2px var(--danger-glow);
+    }
+    .exposure-bar-caption {
+      margin-top: 6px;
+      font-size: 10.5px;
+      color: var(--text-secondary);
+      display: flex; justify-content: space-between; align-items: center;
+    }
 
     .delta-box {
-      background: rgba(255,255,255,0.03);
-      border: 1px dashed rgba(255,255,255,0.12);
-      border-radius: 9px; padding: 9px 11px;
-      font-size: 11px; color: var(--text-muted); line-height: 1.5;
+      margin-top: 4px;
+      padding: 11px 12px;
+      border-radius: var(--radius-sm);
+      background:
+        linear-gradient(90deg, rgba(129,140,248,0.07) 0%, rgba(57,255,20,0.06) 100%);
+      border: 1px solid rgba(129,140,248,0.18);
+      font-size: 11.5px;
+      color: var(--text-secondary);
+      line-height: 1.5;
     }
-    .delta-highlight { color: #fff; font-weight: 600; }
+    .delta-highlight { color: var(--text-primary); font-weight: 600; }
 
-    /* ── Map Legend ── */
+    /* ============================================================
+       MAP LEGEND
+       ============================================================ */
     .map-legend {
-      position: absolute; bottom: 20px; right: 20px;
-      background: var(--card-bg);
+      position: absolute;
+      bottom: 20px; right: 20px;
+      padding: 12px 16px;
+      background: var(--surface-glass);
       backdrop-filter: blur(14px);
       -webkit-backdrop-filter: blur(14px);
-      border: 1px solid var(--card-border);
-      border-radius: 14px; padding: 12px 16px;
-      box-shadow: var(--card-shadow); z-index: 1000;
-      display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+      border: 1px solid var(--stroke);
+      border-radius: var(--radius-lg);
+      box-shadow: var(--shadow-glass);
+      z-index: 900;
+      display: flex; flex-direction: column; gap: 8px;
+      font-size: 12px;
+      color: var(--text-secondary);
     }
     .legend-title {
-      font-size: 10px; font-weight: 700; text-transform: uppercase;
-      letter-spacing: 0.6px; color: var(--text-dim);
+      font-size: 10px; font-weight: 700;
+      letter-spacing: 0.12em; text-transform: uppercase;
+      color: var(--text-tertiary);
     }
-    .legend-item { display: flex; align-items: center; gap: 9px; }
-    .legend-line { width: 24px; height: 4px; border-radius: 2px; }
-    .legend-line-safepath { background: var(--accent-green-neon); box-shadow: 0 0 8px var(--accent-green-glow); }
-    .legend-line-standard { border-top: 3px dashed #60a5fa; height: 0; }
+    .legend-item { display: flex; align-items: center; gap: 10px; }
+    .legend-line {
+      width: 24px; height: 4px; border-radius: 2px;
+      flex-shrink: 0;
+    }
+    .legend-line-safepath {
+      background: var(--accent-green);
+      box-shadow: 0 0 10px var(--accent-green-glow);
+    }
+    .legend-line-standard {
+      border-top: 3px dashed var(--accent-blue);
+      height: 0;
+      opacity: 0.9;
+    }
     .legend-circle-hazard {
+      flex-shrink: 0;
       width: 14px; height: 14px; border-radius: 50%;
-      background: rgba(255,0,51,0.35); border: 2px solid #ef4444;
+      background: rgba(255, 0, 51, 0.30);
+      border: 2px solid var(--danger-500);
     }
 
-    /* Leaflet overrides */
-    .leaflet-bar a {
-      background-color: var(--card-bg) !important;
-      color: #fff !important;
-      border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+    /* ============================================================
+       LEAFLET OVERRIDES — match theme
+       ============================================================ */
+    .leaflet-control-container { display: none !important; } /* Hide default Leaflet chrome */
+
+    .leaflet-container {
+      background: var(--bg-app-2) !important;
+      outline: none;
+      font-family: var(--font-sans);
+    }
+    .leaflet-pane,
+    .leaflet-tile,
+    .leaflet-marker-icon,
+    .leaflet-marker-shadow,
+    .leaflet-tile-container,
+    .leaflet-pane > svg,
+    .leaflet-pane > canvas,
+    .leaflet-zoom-box,
+    .leaflet-image-layer,
+    .leaflet-layer { outline: none; }
+    .leaflet-tooltip {
+      background: var(--surface-elev-2) !important;
+      border: 1px solid var(--stroke-strong) !important;
+      color: var(--text-primary) !important;
+      padding: 7px 10px !important;
+      font-family: var(--font-sans) !important;
+      font-size: 12px !important;
+      border-radius: 10px !important;
+      box-shadow: 0 18px 40px rgba(0,0,0,0.6) !important;
       backdrop-filter: blur(10px);
     }
-    .leaflet-bar a:hover { background-color: rgba(255,255,255,0.18) !important; }
-    .leaflet-control-zoom {
-      border: 1px solid var(--card-border) !important;
-      border-radius: 10px !important; overflow: hidden;
-      box-shadow: var(--card-shadow) !important;
+    .leaflet-tooltip-top:before,
+    .leaflet-tooltip-bottom:before,
+    .leaflet-tooltip-left:before,
+    .leaflet-tooltip-right:before {
+      border-color: transparent !important;
     }
+    .leaflet-popup-content-wrapper {
+      background: var(--surface-elev-2) !important;
+      color: var(--text-primary) !important;
+      border-radius: 12px !important;
+      border: 1px solid var(--stroke-strong) !important;
+      box-shadow: 0 22px 50px rgba(0,0,0,0.65) !important;
+    }
+    .leaflet-popup-tip { background: var(--surface-elev-2) !important; }
+
+    /* ============================================================
+       MOBILE (< 768px) — Bottom Sheet
+       ============================================================ */
+    @media (max-width: 768px) {
+      .topbar {
+        padding: 10px 14px;
+      }
+      .env-chip { display: none; }
+
+      .panel-wrapper {
+        top: auto; left: 0; right: 0; bottom: 0;
+        width: 100%;
+        max-width: none;
+        max-height: min(78vh, 820px);
+        padding: 0 10px calc(10px + env(safe-area-inset-bottom));
+      }
+      .control-panel {
+        border-radius: 22px 22px 18px 18px;
+        padding-bottom: 22px;
+        max-height: min(78vh, 820px);
+        animation: sheetUp 0.42s cubic-bezier(.2,.8,.2,1);
+      }
+      @keyframes sheetUp {
+        from { transform: translateY(30%); opacity: 0.4; }
+        to   { transform: translateY(0); opacity: 1; }
+      }
+      .sheet-grabber {
+        display: flex !important;
+      }
+      .map-legend {
+        bottom: auto; top: 72px; right: 14px;
+        font-size: 11px;
+        padding: 10px 12px;
+      }
+    }
+
+    /* Bottom-sheet grab handle (mobile only) */
+    .sheet-grabber {
+      display: none;
+      width: 100%;
+      justify-content: center;
+      padding-top: 2px;
+      padding-bottom: 10px;
+      cursor: ns-resize;
+    }
+    .sheet-grabber-bar {
+      width: 36px; height: 4px;
+      border-radius: 999px;
+      background: rgba(255,255,255,0.18);
+    }
+
   </style>
 </head>
 <body>
 
 <div id="map"></div>
 
-<!-- ── Floating Control Panel ── -->
-<div class="control-panel">
-
-  <!-- Header -->
-  <div class="header">
-    <div class="brand-row">
-      <div class="brand-title">
-        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
-          <path d="m9 12 2 2 4-4"/>
-        </svg>
-        SafePath
-      </div>
-      <span class="brand-badge">Engine v1.0</span>
-    </div>
-    <p class="brand-tagline">Dynamically Weighted Heuristic Routing Engine</p>
-  </div>
-
-  <!-- Delhi Demo Presets -->
-  <div>
-    <span class="section-label">Delhi Demo Routes</span>
-    <div class="preset-pills">
-      <button class="preset-btn" onclick="applyPreset('lodi_khan')">Lodi Garden → Khan Market</button>
-      <button class="preset-btn" onclick="applyPreset('india_gate')">India Gate → CP</button>
-      <button class="preset-btn" onclick="applyPreset('du_kashmiri')">Delhi Univ → Kashmiri Gate</button>
-    </div>
-  </div>
-
-  <!-- Search Inputs -->
-  <div class="search-group">
-    <span class="section-label">Plan Your Route</span>
-
-    <!-- Start Search -->
-    <div class="search-field" id="start-field">
-      <div class="search-field-label">
-        <span class="pin-dot start"></span>
-        Start — Origin
-      </div>
-      <div class="search-input-wrap">
-        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
-        </svg>
-        <input
-          class="search-input"
-          id="start-search"
-          type="text"
-          placeholder="Search start place, e.g. India Gate"
-          autocomplete="off"
-          oninput="onSearchInput(this, 'start')"
-          onfocus="onSearchFocus('start')"
-        />
-        <button class="clear-btn" id="start-clear" onclick="clearSearch('start')" title="Clear">×</button>
-      </div>
-      <div class="autocomplete-dropdown" id="start-dropdown"></div>
-    </div>
-
-    <!-- End Search -->
-    <div class="search-field" id="end-field">
-      <div class="search-field-label">
-        <span class="pin-dot end"></span>
-        End — Destination
-      </div>
-      <div class="search-input-wrap">
-        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-          <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
-        </svg>
-        <input
-          class="search-input"
-          id="end-search"
-          type="text"
-          placeholder="Search destination, e.g. Connaught Place"
-          autocomplete="off"
-          oninput="onSearchInput(this, 'end')"
-          onfocus="onSearchFocus('end')"
-        />
-        <button class="clear-btn" id="end-clear" onclick="clearSearch('end')" title="Clear">×</button>
-      </div>
-      <div class="autocomplete-dropdown" id="end-dropdown"></div>
-    </div>
-
-    <!-- Fallback: click-to-place hint -->
-    <div class="map-click-hint">
-      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
-        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>
-      </svg>
-      <span id="click-hint-text">Or click the map — 1st click sets <b>Start</b>, 2nd sets <b>End</b></span>
-    </div>
-  </div>
-
-  <!-- Calculate Button -->
-  <button id="calculate-btn" class="calculate-btn" onclick="requestRoute()">
-    <svg id="btn-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
-      <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+<!-- ── Top brand bar ── -->
+<div class="topbar">
+  <div class="brand">
+    <svg class="brand-mark" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round" style="color:#39FF14">
+      <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+      <path d="m9 12 2 2 4-4"/>
     </svg>
-    <span id="btn-text">Calculate Routes</span>
-  </button>
-
-  <!-- Error Banner -->
-  <div id="error-banner" class="alert-banner"></div>
-
-  <!-- Output Section -->
-  <div class="output-section">
-    <div class="output-header">
-      <span class="section-label">Routing Output</span>
-      <span id="status-tag" style="font-size: 11px; color: var(--text-dim);">Ready</span>
-    </div>
-    <div id="metrics-container">
-      <div class="metric-card safepath-card">
-        <div class="metric-title-row">
-          <span class="metric-name safepath-text">Route B — SafePath</span>
-          <span class="metric-pill" style="background:rgba(0,255,136,0.12);color:var(--accent-green-neon);">Optimized</span>
-        </div>
-        <div class="metric-data-line">SafePath: <span id="safepath-output" class="safepath-text">—</span></div>
-      </div>
-      <div class="metric-card standard-card" style="margin-top:8px;">
-        <div class="metric-title-row">
-          <span class="metric-name standard-text">Route A — Standard</span>
-          <span class="metric-pill" style="background:rgba(239,68,68,0.12);color:var(--accent-red);">Baseline</span>
-        </div>
-        <div class="metric-data-line">Standard: <span id="standard-output" class="standard-text">—</span></div>
-      </div>
-      <div class="delta-box" id="delta-box" style="display:none; margin-top:8px;">
-        <span class="delta-highlight">Heuristic Decision:</span>
-        <span id="delta-summary"></span>
-      </div>
-    </div>
+    <span class="brand-name">SafePath</span>
+    <span class="brand-tag">Engine v1.0</span>
   </div>
+  <div class="topbar-right">
+    <span class="env-chip"><span class="env-dot"></span>Heuristic Routing Engine · Live</span>
+  </div>
+</div>
 
+<!-- ── Control Panel ── -->
+<div class="panel-wrapper">
+  <div class="control-panel" role="region" aria-label="SafePath routing controls">
+
+    <div class="sheet-grabber" aria-hidden="true"><div class="sheet-grabber-bar"></div></div>
+
+    <!-- Demo Presets -->
+    <div>
+      <div class="eyebrow">Delhi Demo Routes</div>
+      <div class="preset-pills">
+        <button class="preset-btn" onclick="applyPreset('lodi_khan')">Lodi Garden → Khan Market</button>
+        <button class="preset-btn" onclick="applyPreset('india_gate')">India Gate → CP</button>
+        <button class="preset-btn" onclick="applyPreset('du_kashmiri')">Delhi Univ → Kashmiri Gate</button>
+      </div>
+    </div>
+
+    <!-- Search Inputs -->
+    <div class="search-group">
+      <div class="eyebrow">Plan Your Route</div>
+
+      <div class="search-field" id="start-field">
+        <div class="search-field-label">
+          <span class="pin-dot start"></span>
+          Start — Origin
+        </div>
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+          </svg>
+          <input
+            class="search-input"
+            id="start-search"
+            type="text"
+            placeholder="Search start place, e.g. India Gate"
+            autocomplete="off"
+            oninput="onSearchInput(this, 'start')"
+            onfocus="onSearchFocus('start')"
+          />
+          <button class="clear-btn" id="start-clear" onclick="clearSearch('start')" title="Clear">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="autocomplete-dropdown" id="start-dropdown"></div>
+      </div>
+
+      <div class="search-field" id="end-field">
+        <div class="search-field-label">
+          <span class="pin-dot end"></span>
+          End — Destination
+        </div>
+        <div class="search-input-wrap">
+          <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+            <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+          </svg>
+          <input
+            class="search-input"
+            id="end-search"
+            type="text"
+            placeholder="Search destination, e.g. Connaught Place"
+            autocomplete="off"
+            oninput="onSearchInput(this, 'end')"
+            onfocus="onSearchFocus('end')"
+          />
+          <button class="clear-btn" id="end-clear" onclick="clearSearch('end')" title="Clear">
+            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+              <path d="M18 6 6 18"/><path d="m6 6 12 12"/>
+            </svg>
+          </button>
+        </div>
+        <div class="autocomplete-dropdown" id="end-dropdown"></div>
+      </div>
+
+      <div class="map-click-hint">
+        <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>
+        </svg>
+        <span id="click-hint-text">Or click the map — 1st click sets <b>Start</b>, 2nd sets <b>End</b></span>
+      </div>
+    </div>
+
+    <!-- Calculate Button -->
+    <button id="calculate-btn" class="calculate-btn" onclick="requestRoute()">
+      <svg id="btn-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+      </svg>
+      <span id="btn-text">Calculate Routes</span>
+    </button>
+
+    <!-- Error Banner -->
+    <div id="error-banner" class="alert-banner" role="alert"></div>
+
+    <!-- Output Section -->
+    <div class="output-section">
+      <div class="output-header">
+        <span class="eyebrow" style="margin-bottom:0">Routing Output</span>
+        <span id="status-tag" class="status-tag ready">Ready</span>
+      </div>
+
+      <div id="metrics-container">
+        <!-- SafePath Card (Route B) -->
+        <div class="metric-card safepath-card">
+          <div class="metric-title-row">
+            <span class="metric-name safepath-text">Route B — SafePath</span>
+            <span id="safepath-aqi-pill" class="aqi-pill good"><span class="aqi-dot"></span>AQI 45</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric-cell">
+              <span class="metric-cell-label">Distance</span>
+              <span id="safepath-distance" class="metric-cell-value">—</span>
+            </div>
+            <div class="metric-cell">
+              <span class="metric-cell-label">Exposure</span>
+              <span id="safepath-exposure" class="metric-cell-value" style="color:var(--accent-green)">Low</span>
+            </div>
+          </div>
+          <div class="exposure-bar" aria-hidden="true">
+            <div id="safepath-exposure-bar" class="exposure-bar-fill" style="width:4%"></div>
+          </div>
+          <div class="exposure-bar-caption">
+            <span>Hazard traversed</span>
+            <span id="safepath-hazard-km" style="color:var(--text-primary);font-variant-numeric:tabular-nums;font-weight:500">0.00 km</span>
+          </div>
+        </div>
+
+        <!-- Standard Card (Route A) -->
+        <div class="metric-card standard-card" style="margin-top:10px">
+          <div class="metric-title-row">
+            <span class="metric-name standard-text">Route A — Standard</span>
+            <span id="standard-aqi-pill" class="aqi-pill bad"><span class="aqi-dot"></span>AQI 250+</span>
+          </div>
+          <div class="metric-grid">
+            <div class="metric-cell">
+              <span class="metric-cell-label">Distance</span>
+              <span id="standard-distance" class="metric-cell-value">—</span>
+            </div>
+            <div class="metric-cell">
+              <span class="metric-cell-label">Exposure</span>
+              <span id="standard-exposure" class="metric-cell-value" style="color:var(--danger-400)">Critical</span>
+            </div>
+          </div>
+          <div class="exposure-bar" aria-hidden="true">
+            <div id="standard-exposure-bar" class="exposure-bar-fill" style="width:88%"></div>
+          </div>
+          <div class="exposure-bar-caption">
+            <span>Hazard traversed</span>
+            <span id="standard-hazard-km" style="color:var(--text-primary);font-variant-numeric:tabular-nums;font-weight:500">—</span>
+          </div>
+        </div>
+
+        <!-- Delta decision box -->
+        <div class="delta-box" id="delta-box" style="display:none; margin-top:10px;">
+          <span class="delta-highlight">Heuristic Decision:</span>
+          <span id="delta-summary"></span>
+        </div>
+      </div>
+    </div>
+
+  </div>
 </div>
 
 <!-- ── Map Legend ── -->
@@ -486,7 +920,6 @@
   <div class="legend-item"><div class="legend-circle-hazard"></div><span>AQI 250+ Hazard Zone</span></div>
 </div>
 
-<!-- Leaflet JS -->
 <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
 
 <script>
@@ -500,12 +933,11 @@ const state = {
 
 // ============================================================
 // 1. MAP INITIALISATION — Centred on Delhi, India
+//    (unchanged logic, only theme/display overrides)
 // ============================================================
 const DELHI_CENTER = [28.6139, 77.2090];
 const map = L.map('map', { zoomControl: false, attributionControl: false })
              .setView(DELHI_CENTER, 13);
-
-L.control.zoom({ position: 'topright' }).addTo(map);
 
 // ESRI World Dark Gray Canvas — free, no API key
 L.tileLayer(
@@ -520,22 +952,56 @@ const hazardLayer  = L.layerGroup().addTo(map);
 const routeLayer   = L.layerGroup().addTo(map);
 const markerLayer  = L.layerGroup().addTo(map);
 
-// Custom pin icons
-function makeIcon(color, letter) {
+/* ─── Custom SVG div markers (Start = glowing green dot, End = sleek white target) ─── */
+function makeStartIcon() {
   return L.divIcon({
     className: '',
     html: `<div style="
-      background:${color}; color:#000; font-size:11px; font-weight:800;
-      width:28px; height:28px; border-radius:50%;
-      border:2.5px solid #fff; box-shadow:0 0 14px ${color};
-      display:flex; align-items:center; justify-content:center;
-      transform:translate(-14px,-14px); font-family:Inter,sans-serif;
-    ">${letter}</div>`,
-    iconSize: [28, 28]
+      width:36px;height:36px;border-radius:50%;
+      display:grid;place-items:center;
+      transform:translate(-18px,-18px);
+    ">
+      <div style="
+        position:absolute;inset:0;border-radius:50%;
+        background:#39FF14;opacity:0.18;filter:blur(6px);
+      "></div>
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="position:relative">
+        <circle cx="18" cy="18" r="16" fill="#0B0F19" stroke="#39FF14" stroke-width="2"/>
+        <circle cx="18" cy="18" r="7"  fill="#39FF14"/>
+        <text x="18" y="21.5" text-anchor="middle"
+              font-family="Inter, sans-serif"
+              font-size="10" font-weight="800" fill="#041407">S</text>
+      </svg>
+    </div>`,
+    iconSize: [36, 36]
   });
 }
-const startIcon = makeIcon('#00ff88', 'S');
-const endIcon   = makeIcon('#38bdf8', 'E');
+function makeEndIcon() {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      width:36px;height:36px;border-radius:50%;
+      display:grid;place-items:center;
+      transform:translate(-18px,-18px);
+    ">
+      <div style="
+        position:absolute;inset:0;border-radius:50%;
+        background:#FFFFFF;opacity:0.12;filter:blur(6px);
+      "></div>
+      <svg width="36" height="36" viewBox="0 0 36 36" fill="none" xmlns="http://www.w3.org/2000/svg" style="position:relative">
+        <circle cx="18" cy="18" r="16" fill="#0B0F19" stroke="#FFFFFF" stroke-width="2"/>
+        <circle cx="18" cy="18" r="9"  fill="none" stroke="#FFFFFF" stroke-width="1.4" opacity="0.5"/>
+        <circle cx="18" cy="18" r="4"  fill="#FFFFFF"/>
+        <text x="18" y="21.5" text-anchor="middle"
+              font-family="Inter, sans-serif"
+              font-size="10" font-weight="800" fill="#0B0F19">E</text>
+      </svg>
+    </div>`,
+    iconSize: [36, 36]
+  });
+}
+const startIcon = makeStartIcon();
+const endIcon   = makeEndIcon();
 
 function refreshMarkers() {
   markerLayer.clearLayers();
@@ -571,7 +1037,7 @@ function setState(which, lat, lon, label) {
   state[which] = { lat, lon };
   const input = document.getElementById(`${which}-search`);
   input.value = label;
-  document.getElementById(`${which}-clear`).style.display = 'block';
+  document.getElementById(`${which}-clear`).style.display = 'flex';
 }
 
 function updateClickHint(html) {
@@ -585,7 +1051,7 @@ const debounceTimers = {};
 
 function onSearchInput(input, which) {
   const val = input.value.trim();
-  document.getElementById(`${which}-clear`).style.display = val ? 'block' : 'none';
+  document.getElementById(`${which}-clear`).style.display = val ? 'flex' : 'none';
 
   clearTimeout(debounceTimers[which]);
   if (val.length < 2) { closeDropdown(which); return; }
@@ -604,7 +1070,6 @@ async function geocodeNominatim(query, which) {
   dropdown.style.display = 'block';
 
   try {
-    // Nominatim search — biased toward Delhi with viewbox for relevance
     const url = `https://nominatim.openstreetmap.org/search?` +
       `q=${encodeURIComponent(query)}` +
       `&format=json&limit=6&addressdetails=1` +
@@ -616,7 +1081,7 @@ async function geocodeNominatim(query, which) {
     const results = await res.json();
 
     if (!results.length) {
-      dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#e87070;">No places found — try a different name</div>`;
+      dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#FCA5A5;">No places found — try a different name</div>`;
       return;
     }
 
@@ -641,7 +1106,7 @@ async function geocodeNominatim(query, which) {
       dropdown.appendChild(item);
     });
   } catch (err) {
-    dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#e87070;">Search unavailable</div>`;
+    dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#FCA5A5;">Search unavailable</div>`;
   }
 }
 
@@ -669,7 +1134,6 @@ function closeAllDropdowns() {
   closeDropdown('end');
 }
 
-// Close dropdowns when clicking outside
 document.addEventListener('mousedown', (e) => {
   ['start', 'end'].forEach(which => {
     const field = document.getElementById(`${which}-field`);
@@ -732,6 +1196,7 @@ async function requestRoute() {
   btnText.textContent = 'Calculating… (Fetching OSM Data)';
   document.getElementById('btn-icon').outerHTML =
     '<div class="spinner" id="btn-icon"></div>';
+  statusTag.className = 'status-tag loading';
   statusTag.textContent = 'Computing Graph…';
 
   try {
@@ -751,24 +1216,25 @@ async function requestRoute() {
     // Hazard zones (red circles)
     (data.hazard_zones || []).forEach(hz => {
       L.circle([hz.lat, hz.lon], {
-        radius: hz.radius, color: 'red',
-        fillColor: '#f03', fillOpacity: 0.3, weight: 2
+        radius: hz.radius, color: '#EF4444',
+        fillColor: '#EF4444', fillOpacity: 0.22, weight: 1.5
       }).bindTooltip(
-        `<b style="color:#ef4444">AQI Hazard Zone</b><br>AQI ${hz.aqi} | r=${hz.radius}m`,
-        { sticky: true }
+        `<b style="color:#EF4444">AQI Hazard Zone</b><br>AQI ${hz.aqi} · r=${hz.radius}m`,
+        { sticky: true, direction: 'top', offset: [0, -8] }
       ).addTo(hazardLayer);
     });
 
-    // Standard route — dashed blue
+    // Standard route — dashed slate blue
     if (data.standard_route?.length)
       L.polyline(data.standard_route, {
-        color: '#60a5fa', dashArray: '6, 10', weight: 4, opacity: 0.85
+        color: '#60A5FA', dashArray: '6, 10', weight: 4, opacity: 0.9,
+        lineJoin: 'round', lineCap: 'round'
       }).addTo(routeLayer);
 
     // SafePath route — solid neon green
     if (data.safepath_route?.length)
       L.polyline(data.safepath_route, {
-        color: '#00ff88', weight: 6, opacity: 0.95,
+        color: '#39FF14', weight: 6, opacity: 0.95,
         lineJoin: 'round', lineCap: 'round'
       }).addTo(routeLayer);
 
@@ -776,16 +1242,41 @@ async function requestRoute() {
     const bounds = L.latLngBounds();
     [...(data.standard_route||[]), ...(data.safepath_route||[])].forEach(pt => bounds.extend(pt));
     (data.hazard_zones||[]).forEach(hz => bounds.extend([hz.lat, hz.lon]));
-    if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [70, 70], maxZoom: 17 });
 
     // ── Metrics Display ──
     const sm = data.metrics.standard;
     const sp = data.metrics.safepath;
 
-    document.getElementById('safepath-output').innerHTML =
-      `${sp.distance_km} km | Exposure: ${sp.exposure}`;
-    document.getElementById('standard-output').innerHTML =
-      `${sm.distance_km} km | Exposure: ${sm.exposure}`;
+    document.getElementById('standard-distance').textContent = `${sm.distance_km} km`;
+    document.getElementById('safepath-distance').textContent = `${sp.distance_km} km`;
+
+    document.getElementById('standard-hazard-km').textContent = `${sm.hazard_distance_km} km`;
+    document.getElementById('safepath-hazard-km').textContent = `${sp.hazard_distance_km} km`;
+
+    document.getElementById('standard-exposure').textContent = sm.exposure;
+    document.getElementById('safepath-exposure').textContent = sp.exposure;
+
+    // Exposure bar fill: derived from hazard_distance / max distance
+    const max_km = Math.max(sm.distance_km, sp.distance_km, 0.01);
+    const std_pct = Math.min(100, Math.max(2, Math.round((sm.hazard_distance_km / max_km) * 180)));
+    const sp_pct  = Math.min(100, Math.max(2, Math.round((sp.hazard_distance_km / max_km) * 20)));
+    document.getElementById('standard-exposure-bar').style.width = std_pct + '%';
+    document.getElementById('safepath-exposure-bar').style.width  = sp_pct + '%';
+
+    // AQI pill extraction
+    const aqiMatchSafe = /AQI\s*(\d+)/.exec(sp.exposure || '');
+    const aqiMatchStd  = /AQI\s*(\d+)/.exec(sm.exposure || '');
+    if (aqiMatchSafe) {
+      const pill = document.getElementById('safepath-aqi-pill');
+      pill.classList.add('good'); pill.classList.remove('bad');
+      pill.innerHTML = `<span class="aqi-dot"></span>AQI ${aqiMatchSafe[1]}`;
+    }
+    if (aqiMatchStd) {
+      const pill = document.getElementById('standard-aqi-pill');
+      pill.classList.add('bad'); pill.classList.remove('good');
+      pill.innerHTML = `<span class="aqi-dot"></span>AQI ${aqiMatchStd[1]}`;
+    }
 
     const diff = (sp.distance_km - sm.distance_km).toFixed(2);
     const pct  = sm.distance_km > 0
@@ -797,14 +1288,16 @@ async function requestRoute() {
     document.getElementById('delta-summary').innerHTML =
       ` SafePath added <span class="delta-highlight">+${diff} km (+${pct}%)</span>
         to avoid hazard zones, reducing exposure from
-        <span style="color:var(--accent-red);font-weight:700;">${sm.exposure}</span> →
-        <span style="color:var(--accent-green-neon);font-weight:700;">${sp.exposure}</span>.`;
+        <span style="color:#F87171;font-weight:700;">${sm.exposure}</span> →
+        <span style="color:#39FF14;font-weight:700;">${sp.exposure}</span>.`;
 
+    statusTag.className = 'status-tag done';
     statusTag.textContent = 'Routes Generated';
 
   } catch (err) {
     console.error(err);
     showError(err.message || 'Routing engine error. Check the server is running.');
+    statusTag.className = 'status-tag error';
     statusTag.textContent = 'Error';
   } finally {
     btn.disabled = false;
