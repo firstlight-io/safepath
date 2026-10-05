@@ -19,6 +19,7 @@ from __future__ import annotations
 import logging
 import math
 import os
+import socket
 import time
 from typing import Any, Dict, List, Tuple
 
@@ -38,14 +39,37 @@ if not logger.handlers:
 logger.setLevel(logging.INFO)
 
 # ==============================================================================
-# OSMnx & Overpass Network Configuration
+# IPv4-Only Patch — prevents "Errno 101: Network is unreachable" on Render
+# (Render's egress sometimes has broken IPv6 routing; force AF_INET via getaddrinfo)
 # ==============================================================================
+_ORIG_GETADDRINFO = socket.getaddrinfo
+
+def _force_ipv4_getaddrinfo(host, port, family=0, type=0, proto=0, flags=0):
+    try:
+        return _ORIG_GETADDRINFO(host, port, socket.AF_INET, type, proto, flags)
+    except socket.gaierror:
+        return _ORIG_GETADDRINFO(host, port, family, type, proto, flags)
+
+socket.getaddrinfo = _force_ipv4_getaddrinfo
 osmnx._http._config_dns = lambda url: None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
 os.makedirs(CACHE_DIR, exist_ok=True)
 logger.info(f"OSMnx cache directory: {CACHE_DIR}")
+
+# ==============================================================================
+# Overpass API endpoint fallback list.
+# Render's free tier egress cannot reach overpass-api.de directly (Errno 101),
+# so we cycle through community mirrors. Try fastest / most permissive first.
+# ==============================================================================
+OVERPASS_ENDPOINTS: List[str] = [
+    "https://overpass.kumi.systems/api/interpreter",
+    "https://overpass.openstreetmap.ru/api/interpreter",
+    "https://overpass.osm.ch/api/interpreter",
+    "https://overpass.torresval.de/api/interpreter",
+    "https://overpass-api.de/api/interpreter",
+]
 
 ox.settings.http_user_agent = "SafePath-Routing-Engine/1.0 (academic-research@safepath.local)"
 ox.settings.http_referer = "https://safepath.local"
@@ -55,6 +79,8 @@ ox.settings.overpass_rate_limit = False
 ox.settings.log_console = False
 ox.settings.timeout = 60
 ox.settings.requests_kwargs = {"timeout": 60}
+ox.settings.overpass_endpoint = OVERPASS_ENDPOINTS[0]
+logger.info(f"Default Overpass endpoint: {OVERPASS_ENDPOINTS[0]}")
 
 
 def haversine_distance(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
@@ -96,7 +122,7 @@ def generate_hazard_zones(
     engine to navigate safely around them, hazard centers are placed at fractional
     intervals (e.g. 35% and 65%) along the direct vector between Start and End,
     with a small perpendicular offset.
-    
+
     The radius is roughly 400 meters, adaptively clamped if start and end are close
     together so that the hazard zone does not completely engulf the endpoints.
     """
@@ -171,13 +197,11 @@ def fetch_pedestrian_graph(
     Download a pedestrian street network graph from OpenStreetMap bounded by
     the start/end coordinates plus a buffer.
 
-    Note: OSMnx internally expands the bounding polygon by an additional 500m
-    during graph construction, so a modest initial buffer (~200m) ensures
-    fast Overpass downloads while providing ample network for detour routing.
+    Cycles through a list of public Overpass API endpoints (mirrors) because
+    some PaaS providers (Render free tier, etc.) block the default
+    overpass-api.de host at the network level.
     """
-    # Convert buffer distance to approximate degrees (1 deg latitude ~ 111.32 km)
     buffer_deg_lat = buffer_meters / 111320.0
-    # Longitude degrees shrink by cos(latitude)
     avg_lat = (start_lat + end_lat) / 2.0
     buffer_deg_lon = buffer_meters / (111320.0 * max(0.1, math.cos(math.radians(avg_lat))))
 
@@ -186,37 +210,51 @@ def fetch_pedestrian_graph(
     min_lon = min(start_lon, end_lon) - buffer_deg_lon
     max_lon = max(start_lon, end_lon) + buffer_deg_lon
 
-    # OSMnx 2.x bbox format is (left, bottom, right, top) -> (min_lon, min_lat, max_lon, max_lat)
     bbox = (min_lon, min_lat, max_lon, max_lat)
     logger.info(f"Downloading walk network for bounding box: {bbox}")
     t0 = time.time()
 
-    max_retries = 3
-    last_exc = None
-    for attempt in range(1, max_retries + 1):
-        try:
-            G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
-            elapsed = time.time() - t0
-            logger.info(f"Street network downloaded in {elapsed:.1f}s — {len(G)} nodes, {G.number_of_edges()} edges")
-            break
-        except Exception as exc:
-            last_exc = exc
-            logger.warning(f"Overpass download attempt {attempt}/{max_retries} failed: {exc}")
-            if attempt < max_retries:
-                wait_s = attempt * 4
-                logger.info(f"Retrying in {wait_s}s...")
-                time.sleep(wait_s)
-            else:
-                logger.error(f"All {max_retries} Overpass download attempts failed")
-    else:
-        raise ValueError(
-            f"Unable to retrieve street network data for coordinates after {max_retries} attempts: {last_exc}"
+    last_exc: Exception | None = None
+    retries_per_endpoint = 2
+
+    for ep_idx, endpoint in enumerate(OVERPASS_ENDPOINTS):
+        ox.settings.overpass_endpoint = endpoint
+        logger.info(
+            f"Trying Overpass endpoint [{ep_idx + 1}/{len(OVERPASS_ENDPOINTS)}]: {endpoint}"
         )
 
-    if len(G) == 0:
-        raise ValueError("Retrieved street network contains no walkable segments.")
+        for attempt in range(1, retries_per_endpoint + 1):
+            try:
+                G = ox.graph_from_bbox(bbox=bbox, network_type="walk", simplify=True)
+                elapsed = time.time() - t0
+                logger.info(
+                    f"Street network downloaded via {endpoint} in {elapsed:.1f}s — "
+                    f"{len(G)} nodes, {G.number_of_edges()} edges"
+                )
+                if len(G) == 0:
+                    raise ValueError("Retrieved street network contains no walkable segments.")
+                return G
 
-    return G
+            except Exception as exc:
+                last_exc = exc
+                is_conn_err = any(
+                    kw in str(exc).lower()
+                    for kw in ("unreachable", "connection", "timed out", "newconnectionerror", "max retries")
+                )
+                logger.warning(
+                    f"  Endpoint {endpoint} attempt {attempt}/{retries_per_endpoint} failed: {exc}"
+                )
+                if is_conn_err and attempt == retries_per_endpoint:
+                    logger.warning(f"  Connection-level failure on {endpoint}, moving to next endpoint")
+                    break
+                if attempt < retries_per_endpoint:
+                    time.sleep(attempt * 3)
+
+    all_endpoints_str = ", ".join(OVERPASS_ENDPOINTS)
+    raise ValueError(
+        f"Unable to retrieve street network data. Tried all {len(OVERPASS_ENDPOINTS)} "
+        f"Overpass endpoints ({all_endpoints_str}). Last error: {last_exc}"
+    )
 
 
 def apply_algorithmic_weighting(
@@ -228,17 +266,17 @@ def apply_algorithmic_weighting(
     ALGORITHMIC WEIGHTING LOGIC:
     ===========================
     Iterates through all edges in the OpenStreetMap network graph.
-    
+
     1. Base Weight:
        Each edge possesses a physical `length` attribute in meters (calculated by OSMnx).
-       
+
     2. Hazard Proximity Evaluation:
        For each edge (u, v, key):
        - We compute the spatial midpoint between nodes u and v (or sample coordinates along
          the edge LineString geometry when available).
        - We test the Haversine distance between the edge midpoint and the center of every
          High-AQI Hazard Zone.
-         
+
     3. Heuristic Impedance Assignment:
        - If the edge falls within `hazard_radius`, it is exposed to hazardous air pollution.
          We multiply its base length weight by a severe penalty factor (default 100x):
@@ -247,7 +285,7 @@ def apply_algorithmic_weighting(
          hazardous streets mathematically unfavorable.
        - If the edge is clean (outside all hazard zones):
              safepath_weight = base_length
-             
+
     4. Preservation of Physical Ground Truth:
        Crucially, `data['length']` is left untouched. This guarantees that when we compute
        the final journey distance in kilometers, we report actual physical walking distance,
