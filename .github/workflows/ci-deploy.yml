@@ -1,0 +1,70 @@
+name: CI and Deploy
+
+on:
+  push:
+    branches: ["main"]
+  pull_request:
+    branches: ["main"]
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  verify:
+    name: Verify
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.11"
+          cache: "pip"
+
+      - name: Install dependencies
+        run: pip install -r requirements.txt
+
+      - name: Validate Python syntax
+        run: python -m compileall main.py engine.py
+
+  deploy-production:
+    name: Deploy Production
+    runs-on: ubuntu-latest
+    needs: verify
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
+    steps:
+      - name: Trigger production deploy webhook
+        env:
+          DEPLOY_WEBHOOK_URL: ${{ secrets.DEPLOY_WEBHOOK_URL }}
+        run: |
+          if [ -z "$DEPLOY_WEBHOOK_URL" ]; then
+            echo "DEPLOY_WEBHOOK_URL secret is not set. Skipping production deploy."
+            exit 0
+          fi
+          curl --fail --show-error --silent -X POST "$DEPLOY_WEBHOOK_URL"
+          echo "Production deploy triggered."
+
+  deploy-preview:
+    name: Deploy Preview (optional)
+    runs-on: ubuntu-latest
+    needs: verify
+    if: github.event_name == 'pull_request'
+    steps:
+      - name: Trigger preview deploy webhook
+        env:
+          PREVIEW_DEPLOY_WEBHOOK_URL: ${{ secrets.PREVIEW_DEPLOY_WEBHOOK_URL }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          BRANCH_NAME: ${{ github.head_ref }}
+        run: |
+          if [ -z "$PREVIEW_DEPLOY_WEBHOOK_URL" ]; then
+            echo "PREVIEW_DEPLOY_WEBHOOK_URL secret is not set. Skipping preview deploy."
+            exit 0
+          fi
+          curl --fail --show-error --silent \
+            -X POST "$PREVIEW_DEPLOY_WEBHOOK_URL" \
+            -H "Content-Type: application/json" \
+            -d "{\"pr\": \"${PR_NUMBER}\", \"branch\": \"${BRANCH_NAME}\"}"
+          echo "Preview deploy triggered."

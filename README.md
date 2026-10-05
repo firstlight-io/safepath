@@ -121,6 +121,31 @@ Open:
 
 ---
 
+## CI/CD Auto-Deploy (GitHub Actions)
+
+This repository includes:
+
+- `/home/runner/work/safepath/safepath/.github/workflows/ci-deploy.yml`
+
+Behavior:
+
+- On `pull_request` to `main`:
+  - installs dependencies
+  - validates Python syntax
+  - optionally triggers preview deploy webhook
+- On `push` to `main`:
+  - runs the same verification
+  - triggers production deploy webhook
+
+Required repository secrets:
+
+- `DEPLOY_WEBHOOK_URL` (required for production auto-deploy)
+- `PREVIEW_DEPLOY_WEBHOOK_URL` (optional for PR preview deployments)
+
+If a secret is missing, the related deploy step is skipped safely.
+
+---
+
 ## Notes & Constraints
 
 - Routing depends on live OSM/Overpass availability.
@@ -129,4 +154,3 @@ Open:
 - Route requests are constrained by engine validation:
   - minimum trip distance: 20m
   - maximum trip distance: 6km
-
