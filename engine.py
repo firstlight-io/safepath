@@ -78,7 +78,7 @@ ox.settings.cache_folder = CACHE_DIR
 ox.settings.overpass_rate_limit = False
 ox.settings.log_console = False
 ox.settings.timeout = 60
-ox.settings.requests_kwargs = {"timeout": 60}
+ox.settings.requests_kwargs = {}
 ox.settings.overpass_endpoint = OVERPASS_ENDPOINTS[0]
 logger.info(f"Default Overpass endpoint: {OVERPASS_ENDPOINTS[0]}")
 
