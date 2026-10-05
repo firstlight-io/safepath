@@ -18,11 +18,11 @@ from __future__ import annotations
 
 import logging
 import math
+import socket
 from typing import Any, Dict, List, Tuple
 
 import networkx as nx
 import osmnx as ox
-import osmnx._http
 from shapely.geometry import LineString
 
 # Configure logger
@@ -39,13 +39,19 @@ logger.setLevel(logging.INFO)
 # ==============================================================================
 # OSMnx & Overpass Network Configuration
 # ==============================================================================
-# Patch OSMnx's internal DNS mutation helper to allow standard dual-stack (IPv6/IPv4)
-# resolution. This prevents connection timeouts on environments with IPv6-preferred routing.
-osmnx._http._config_dns = lambda url: None
-
 # Configure polite OSMnx headers & caching to adhere to OSM acceptable use policy
-ox.settings.http_user_agent = "SafePath-Routing-Engine/1.0 (academic-research@safepath.local)"
+USER_AGENT = "SafePath-Woxsen-University/1.0"
+REQUEST_TIMEOUT_SECONDS = 60
+
+socket.setdefaulttimeout(REQUEST_TIMEOUT_SECONDS)
+
+ox.settings.http_user_agent = USER_AGENT
 ox.settings.http_referer = "https://safepath.local"
+ox.settings.requests_timeout = REQUEST_TIMEOUT_SECONDS
+ox.settings.requests_kwargs = {
+    "headers": {"User-Agent": USER_AGENT},
+    "timeout": REQUEST_TIMEOUT_SECONDS,
+}
 ox.settings.use_cache = True
 ox.settings.cache_folder = "cache"
 ox.settings.overpass_rate_limit = False
