@@ -1,0 +1,828 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>SafePath — Heuristic Pedestrian Routing Engine</title>
+
+  <!-- Leaflet CSS -->
+  <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" integrity="sha256-p4NxAoJBhIIN+hmNHrzRCf9tD/miZyoHS5obTRR9BMY=" crossorigin=""/>
+  <!-- Google Fonts -->
+  <link rel="preconnect" href="https://fonts.googleapis.com">
+  <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+  <link href="https://fonts.googleapis.com/css2?family=Inter:wght@300;400;500;600;700;800&family=JetBrains+Mono:wght@400;500;600&display=swap" rel="stylesheet">
+
+  <style>
+    :root {
+      --bg-dark: #0a0e17;
+      --card-bg: rgba(13, 20, 36, 0.88);
+      --card-border: rgba(255, 255, 255, 0.1);
+      --card-shadow: 0 20px 45px rgba(0, 0, 0, 0.65), 0 0 1px rgba(255,255,255,0.12);
+      --text-main: #f1f5f9;
+      --text-muted: #94a3b8;
+      --text-dim: #64748b;
+      --accent-green: #10b981;
+      --accent-green-neon: #00ff88;
+      --accent-green-glow: rgba(0, 255, 136, 0.35);
+      --accent-red: #ef4444;
+      --accent-blue: #38bdf8;
+      --accent-indigo: #6366f1;
+      --font-sans: 'Inter', -apple-system, BlinkMacSystemFont, sans-serif;
+      --font-mono: 'JetBrains Mono', monospace;
+    }
+
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    body, html {
+      width: 100%; height: 100%;
+      overflow: hidden;
+      font-family: var(--font-sans);
+      background: var(--bg-dark);
+      color: var(--text-main);
+    }
+
+    #map {
+      width: 100%; height: 100%;
+      position: absolute; top: 0; left: 0; z-index: 1;
+      background: #090d16;
+    }
+
+    /* ── Control Panel ── */
+    .control-panel {
+      position: absolute;
+      top: 18px; left: 18px;
+      width: 400px;
+      max-width: calc(100vw - 36px);
+      max-height: calc(100vh - 36px);
+      background: var(--card-bg);
+      backdrop-filter: blur(18px);
+      -webkit-backdrop-filter: blur(18px);
+      border: 1px solid var(--card-border);
+      border-radius: 20px;
+      padding: 20px;
+      box-shadow: var(--card-shadow);
+      z-index: 1000;
+      overflow-y: auto;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+      scrollbar-width: thin;
+      scrollbar-color: rgba(255,255,255,0.15) transparent;
+      animation: fadeSlide 0.35s ease-out;
+    }
+
+    @keyframes fadeSlide {
+      from { opacity: 0; transform: translateY(-8px); }
+      to   { opacity: 1; transform: translateY(0); }
+    }
+
+    /* ── Header ── */
+    .header { border-bottom: 1px solid rgba(255,255,255,0.08); padding-bottom: 14px; }
+    .brand-row {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .brand-title {
+      font-size: 21px; font-weight: 800; letter-spacing: -0.4px;
+      display: flex; align-items: center; gap: 8px; color: #fff;
+    }
+    .brand-badge {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      padding: 3px 8px; border-radius: 6px;
+      background: rgba(16,185,129,0.15);
+      border: 1px solid rgba(16,185,129,0.35);
+      color: var(--accent-green-neon); letter-spacing: 0.5px;
+    }
+    .brand-tagline { font-size: 11.5px; color: var(--text-muted); margin-top: 4px; }
+
+    /* ── Section Label ── */
+    .section-label {
+      font-size: 10.5px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--text-dim);
+    }
+
+    /* ── Presets ── */
+    .preset-pills { display: flex; gap: 6px; flex-wrap: wrap; margin-top: 6px; }
+    .preset-btn {
+      background: rgba(255,255,255,0.06);
+      border: 1px solid rgba(255,255,255,0.1);
+      color: var(--text-muted);
+      font-size: 11px; font-weight: 500;
+      padding: 5px 10px; border-radius: 8px;
+      cursor: pointer; transition: all 0.2s;
+    }
+    .preset-btn:hover {
+      background: rgba(255,255,255,0.14);
+      color: #fff; border-color: rgba(255,255,255,0.25);
+    }
+
+    /* ── Search Box (Uber-style) ── */
+    .search-group { display: flex; flex-direction: column; gap: 8px; }
+
+    .search-field {
+      position: relative;
+    }
+
+    .search-field-label {
+      display: flex; align-items: center; gap: 6px;
+      font-size: 10.5px; font-weight: 600; color: var(--text-dim);
+      text-transform: uppercase; letter-spacing: 0.5px;
+      margin-bottom: 5px;
+    }
+
+    .pin-dot {
+      width: 9px; height: 9px; border-radius: 50%;
+      flex-shrink: 0;
+    }
+    .pin-dot.start { background: var(--accent-green-neon); box-shadow: 0 0 8px var(--accent-green-neon); }
+    .pin-dot.end   { background: var(--accent-blue);       box-shadow: 0 0 8px var(--accent-blue); }
+
+    .search-input-wrap {
+      position: relative;
+      display: flex; align-items: center;
+    }
+
+    .search-icon {
+      position: absolute; left: 10px;
+      color: var(--text-dim); pointer-events: none;
+    }
+
+    .search-input {
+      width: 100%;
+      background: rgba(0,0,0,0.35);
+      border: 1px solid rgba(255,255,255,0.1);
+      border-radius: 10px;
+      padding: 9px 36px 9px 34px;
+      color: #fff;
+      font-family: var(--font-sans);
+      font-size: 13px;
+      outline: none;
+      transition: border-color 0.15s, background 0.15s;
+    }
+    .search-input::placeholder { color: var(--text-dim); }
+    .search-input:focus {
+      border-color: var(--accent-indigo);
+      background: rgba(255,255,255,0.07);
+    }
+
+    .clear-btn {
+      position: absolute; right: 8px;
+      background: none; border: none;
+      color: var(--text-dim); cursor: pointer;
+      font-size: 16px; line-height: 1;
+      padding: 2px 4px; border-radius: 4px;
+      transition: color 0.15s;
+      display: none;
+    }
+    .clear-btn:hover { color: #fff; }
+
+    /* ── Autocomplete Dropdown ── */
+    .autocomplete-dropdown {
+      position: absolute;
+      top: calc(100% + 4px);
+      left: 0; right: 0;
+      background: rgba(10, 15, 28, 0.97);
+      border: 1px solid rgba(255,255,255,0.12);
+      border-radius: 12px;
+      box-shadow: 0 12px 32px rgba(0,0,0,0.6);
+      z-index: 2000;
+      overflow: hidden;
+      display: none;
+    }
+
+    .autocomplete-item {
+      padding: 10px 14px;
+      cursor: pointer;
+      display: flex; gap: 10px; align-items: flex-start;
+      border-bottom: 1px solid rgba(255,255,255,0.05);
+      transition: background 0.12s;
+    }
+    .autocomplete-item:last-child { border-bottom: none; }
+    .autocomplete-item:hover { background: rgba(255,255,255,0.08); }
+
+    .autocomplete-item-icon { 
+      flex-shrink: 0; margin-top: 1px;
+      color: var(--text-dim);
+    }
+    .autocomplete-item-text { display: flex; flex-direction: column; gap: 1px; }
+    .autocomplete-item-main { font-size: 13px; font-weight: 500; color: #fff; }
+    .autocomplete-item-sub  { font-size: 11px; color: var(--text-dim); }
+
+    .autocomplete-loading {
+      padding: 12px 14px; font-size: 12px;
+      color: var(--text-dim); display: flex; align-items: center; gap: 8px;
+    }
+    .mini-spinner {
+      width: 12px; height: 12px;
+      border: 2px solid rgba(255,255,255,0.1);
+      border-top-color: var(--accent-blue);
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+    @keyframes spin { to { transform: rotate(360deg); } }
+
+    /* Map-click hint strip */
+    .map-click-hint {
+      font-size: 11px; color: var(--text-dim);
+      display: flex; align-items: center; gap: 6px;
+      background: rgba(255,255,255,0.03);
+      border: 1px dashed rgba(255,255,255,0.1);
+      border-radius: 8px; padding: 7px 10px;
+    }
+
+    /* ── Calculate Button ── */
+    .calculate-btn {
+      background: linear-gradient(135deg, #10b981 0%, #059669 100%);
+      color: #fff; border: none; border-radius: 12px;
+      padding: 13px 18px; font-size: 14px; font-weight: 700;
+      cursor: pointer; display: flex; align-items: center; justify-content: center;
+      gap: 8px; box-shadow: 0 4px 20px rgba(16,185,129,0.35);
+      transition: all 0.2s;
+    }
+    .calculate-btn:hover:not(:disabled) {
+      transform: translateY(-1px);
+      box-shadow: 0 6px 24px rgba(16,185,129,0.5);
+    }
+    .calculate-btn:disabled {
+      background: rgba(255,255,255,0.1); color: var(--text-dim);
+      cursor: not-allowed; box-shadow: none; transform: none;
+    }
+    .spinner {
+      width: 15px; height: 15px;
+      border: 2px solid rgba(255,255,255,0.25);
+      border-top-color: #fff;
+      border-radius: 50%; animation: spin 0.8s linear infinite;
+    }
+
+    /* ── Error banner ── */
+    .alert-banner {
+      background: rgba(239,68,68,0.12);
+      border: 1px solid rgba(239,68,68,0.3);
+      color: #fca5a5; font-size: 12px;
+      border-radius: 8px; padding: 8px 12px;
+      display: none;
+    }
+
+    /* ── Metrics output ── */
+    .output-section {
+      display: flex; flex-direction: column; gap: 10px;
+      border-top: 1px solid rgba(255,255,255,0.07);
+      padding-top: 14px;
+    }
+    .output-header {
+      display: flex; align-items: center; justify-content: space-between;
+    }
+    .metric-card {
+      border-radius: 11px; padding: 11px 13px;
+      border: 1px solid rgba(255,255,255,0.06);
+      background: rgba(0,0,0,0.3);
+    }
+    .metric-card.safepath-card {
+      border-left: 4px solid var(--accent-green-neon);
+      background: linear-gradient(90deg, rgba(0,255,136,0.07) 0%, rgba(0,0,0,0.28) 100%);
+    }
+    .metric-card.standard-card {
+      border-left: 4px solid var(--accent-red);
+      background: linear-gradient(90deg, rgba(239,68,68,0.07) 0%, rgba(0,0,0,0.28) 100%);
+    }
+    .metric-title-row {
+      display: flex; justify-content: space-between; align-items: center;
+      margin-bottom: 4px;
+    }
+    .metric-name { font-size: 12.5px; font-weight: 700; }
+    .metric-pill {
+      font-size: 9.5px; font-weight: 700;
+      padding: 2px 6px; border-radius: 4px; text-transform: uppercase;
+    }
+    .safepath-text { color: var(--accent-green-neon); font-weight: 600; }
+    .standard-text { color: var(--accent-red); font-weight: 600; }
+    .metric-data-line { font-size: 12.5px; font-family: var(--font-mono); }
+
+    .delta-box {
+      background: rgba(255,255,255,0.03);
+      border: 1px dashed rgba(255,255,255,0.12);
+      border-radius: 9px; padding: 9px 11px;
+      font-size: 11px; color: var(--text-muted); line-height: 1.5;
+    }
+    .delta-highlight { color: #fff; font-weight: 600; }
+
+    /* ── Map Legend ── */
+    .map-legend {
+      position: absolute; bottom: 20px; right: 20px;
+      background: var(--card-bg);
+      backdrop-filter: blur(14px);
+      -webkit-backdrop-filter: blur(14px);
+      border: 1px solid var(--card-border);
+      border-radius: 14px; padding: 12px 16px;
+      box-shadow: var(--card-shadow); z-index: 1000;
+      display: flex; flex-direction: column; gap: 8px; font-size: 12px;
+    }
+    .legend-title {
+      font-size: 10px; font-weight: 700; text-transform: uppercase;
+      letter-spacing: 0.6px; color: var(--text-dim);
+    }
+    .legend-item { display: flex; align-items: center; gap: 9px; }
+    .legend-line { width: 24px; height: 4px; border-radius: 2px; }
+    .legend-line-safepath { background: var(--accent-green-neon); box-shadow: 0 0 8px var(--accent-green-glow); }
+    .legend-line-standard { border-top: 3px dashed #60a5fa; height: 0; }
+    .legend-circle-hazard {
+      width: 14px; height: 14px; border-radius: 50%;
+      background: rgba(255,0,51,0.35); border: 2px solid #ef4444;
+    }
+
+    /* Leaflet overrides */
+    .leaflet-bar a {
+      background-color: var(--card-bg) !important;
+      color: #fff !important;
+      border-bottom: 1px solid rgba(255,255,255,0.1) !important;
+      backdrop-filter: blur(10px);
+    }
+    .leaflet-bar a:hover { background-color: rgba(255,255,255,0.18) !important; }
+    .leaflet-control-zoom {
+      border: 1px solid var(--card-border) !important;
+      border-radius: 10px !important; overflow: hidden;
+      box-shadow: var(--card-shadow) !important;
+    }
+  </style>
+</head>
+<body>
+
+<div id="map"></div>
+
+<!-- ── Floating Control Panel ── -->
+<div class="control-panel">
+
+  <!-- Header -->
+  <div class="header">
+    <div class="brand-row">
+      <div class="brand-title">
+        <svg width="21" height="21" viewBox="0 0 24 24" fill="none" stroke="#00ff88" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M12 22s8-4 8-10V5l-8-3-8 3v7c0 6 8 10 8 10z"/>
+          <path d="m9 12 2 2 4-4"/>
+        </svg>
+        SafePath
+      </div>
+      <span class="brand-badge">Engine v1.0</span>
+    </div>
+    <p class="brand-tagline">Dynamically Weighted Heuristic Routing Engine</p>
+  </div>
+
+  <!-- Delhi Demo Presets -->
+  <div>
+    <span class="section-label">Delhi Demo Routes</span>
+    <div class="preset-pills">
+      <button class="preset-btn" onclick="applyPreset('lodi_khan')">Lodi Garden → Khan Market</button>
+      <button class="preset-btn" onclick="applyPreset('india_gate')">India Gate → CP</button>
+      <button class="preset-btn" onclick="applyPreset('du_kashmiri')">Delhi Univ → Kashmiri Gate</button>
+    </div>
+  </div>
+
+  <!-- Search Inputs -->
+  <div class="search-group">
+    <span class="section-label">Plan Your Route</span>
+
+    <!-- Start Search -->
+    <div class="search-field" id="start-field">
+      <div class="search-field-label">
+        <span class="pin-dot start"></span>
+        Start — Origin
+      </div>
+      <div class="search-input-wrap">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <circle cx="11" cy="11" r="8"/><path d="m21 21-4.35-4.35"/>
+        </svg>
+        <input
+          class="search-input"
+          id="start-search"
+          type="text"
+          placeholder="Search start place, e.g. India Gate"
+          autocomplete="off"
+          oninput="onSearchInput(this, 'start')"
+          onfocus="onSearchFocus('start')"
+        />
+        <button class="clear-btn" id="start-clear" onclick="clearSearch('start')" title="Clear">×</button>
+      </div>
+      <div class="autocomplete-dropdown" id="start-dropdown"></div>
+    </div>
+
+    <!-- End Search -->
+    <div class="search-field" id="end-field">
+      <div class="search-field-label">
+        <span class="pin-dot end"></span>
+        End — Destination
+      </div>
+      <div class="search-input-wrap">
+        <svg class="search-icon" width="15" height="15" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+        </svg>
+        <input
+          class="search-input"
+          id="end-search"
+          type="text"
+          placeholder="Search destination, e.g. Connaught Place"
+          autocomplete="off"
+          oninput="onSearchInput(this, 'end')"
+          onfocus="onSearchFocus('end')"
+        />
+        <button class="clear-btn" id="end-clear" onclick="clearSearch('end')" title="Clear">×</button>
+      </div>
+      <div class="autocomplete-dropdown" id="end-dropdown"></div>
+    </div>
+
+    <!-- Fallback: click-to-place hint -->
+    <div class="map-click-hint">
+      <svg width="13" height="13" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+        <path d="M3 3l7.07 16.97 2.51-7.39 7.39-2.51L3 3z"/><path d="m13 13 6 6"/>
+      </svg>
+      <span id="click-hint-text">Or click the map — 1st click sets <b>Start</b>, 2nd sets <b>End</b></span>
+    </div>
+  </div>
+
+  <!-- Calculate Button -->
+  <button id="calculate-btn" class="calculate-btn" onclick="requestRoute()">
+    <svg id="btn-icon" width="17" height="17" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+      <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+    </svg>
+    <span id="btn-text">Calculate Routes</span>
+  </button>
+
+  <!-- Error Banner -->
+  <div id="error-banner" class="alert-banner"></div>
+
+  <!-- Output Section -->
+  <div class="output-section">
+    <div class="output-header">
+      <span class="section-label">Routing Output</span>
+      <span id="status-tag" style="font-size: 11px; color: var(--text-dim);">Ready</span>
+    </div>
+    <div id="metrics-container">
+      <div class="metric-card safepath-card">
+        <div class="metric-title-row">
+          <span class="metric-name safepath-text">Route B — SafePath</span>
+          <span class="metric-pill" style="background:rgba(0,255,136,0.12);color:var(--accent-green-neon);">Optimized</span>
+        </div>
+        <div class="metric-data-line">SafePath: <span id="safepath-output" class="safepath-text">—</span></div>
+      </div>
+      <div class="metric-card standard-card" style="margin-top:8px;">
+        <div class="metric-title-row">
+          <span class="metric-name standard-text">Route A — Standard</span>
+          <span class="metric-pill" style="background:rgba(239,68,68,0.12);color:var(--accent-red);">Baseline</span>
+        </div>
+        <div class="metric-data-line">Standard: <span id="standard-output" class="standard-text">—</span></div>
+      </div>
+      <div class="delta-box" id="delta-box" style="display:none; margin-top:8px;">
+        <span class="delta-highlight">Heuristic Decision:</span>
+        <span id="delta-summary"></span>
+      </div>
+    </div>
+  </div>
+
+</div>
+
+<!-- ── Map Legend ── -->
+<div class="map-legend">
+  <div class="legend-title">Map Legend</div>
+  <div class="legend-item"><div class="legend-line legend-line-safepath"></div><span>SafePath Route</span></div>
+  <div class="legend-item"><div class="legend-line legend-line-standard"></div><span>Standard Route</span></div>
+  <div class="legend-item"><div class="legend-circle-hazard"></div><span>AQI 250+ Hazard Zone</span></div>
+</div>
+
+<!-- Leaflet JS -->
+<script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js" integrity="sha256-20nQCchB9co0qIjJZRGuk2/Z9VM+kNiyxNV1lvTlZBo=" crossorigin=""></script>
+
+<script>
+// ============================================================
+// Internal coordinate state (lat/lon stored here, not in inputs)
+// ============================================================
+const state = {
+  start: { lat: null, lon: null },
+  end:   { lat: null, lon: null }
+};
+
+// ============================================================
+// 1. MAP INITIALISATION — Centred on Delhi, India
+// ============================================================
+const DELHI_CENTER = [28.6139, 77.2090];
+const map = L.map('map', { zoomControl: false, attributionControl: false })
+             .setView(DELHI_CENTER, 13);
+
+L.control.zoom({ position: 'topright' }).addTo(map);
+
+// ESRI World Dark Gray Canvas — free, no API key
+L.tileLayer(
+  'https://server.arcgisonline.com/ArcGIS/rest/services/Canvas/World_Dark_Gray_Base/MapServer/tile/{z}/{y}/{x}',
+  {
+    attribution: '&copy; <a href="https://www.esri.com">Esri</a> | &copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>',
+    maxZoom: 16, minZoom: 2
+  }
+).addTo(map);
+
+const hazardLayer  = L.layerGroup().addTo(map);
+const routeLayer   = L.layerGroup().addTo(map);
+const markerLayer  = L.layerGroup().addTo(map);
+
+// Custom pin icons
+function makeIcon(color, letter) {
+  return L.divIcon({
+    className: '',
+    html: `<div style="
+      background:${color}; color:#000; font-size:11px; font-weight:800;
+      width:28px; height:28px; border-radius:50%;
+      border:2.5px solid #fff; box-shadow:0 0 14px ${color};
+      display:flex; align-items:center; justify-content:center;
+      transform:translate(-14px,-14px); font-family:Inter,sans-serif;
+    ">${letter}</div>`,
+    iconSize: [28, 28]
+  });
+}
+const startIcon = makeIcon('#00ff88', 'S');
+const endIcon   = makeIcon('#38bdf8', 'E');
+
+function refreshMarkers() {
+  markerLayer.clearLayers();
+  if (state.start.lat != null)
+    L.marker([state.start.lat, state.start.lon], { icon: startIcon }).addTo(markerLayer);
+  if (state.end.lat != null)
+    L.marker([state.end.lat, state.end.lon], { icon: endIcon }).addTo(markerLayer);
+}
+
+// ============================================================
+// 2. MAP CLICK — 1st click = Start, 2nd click = End
+// ============================================================
+let clickState = 0; // 0 = next click is Start, 1 = next click is End
+
+map.on('click', (e) => {
+  const lat = parseFloat(e.latlng.lat.toFixed(5));
+  const lon = parseFloat(e.latlng.lng.toFixed(5));
+  closeAllDropdowns();
+
+  if (clickState === 0) {
+    setState('start', lat, lon, `Pin (${lat}, ${lon})`);
+    updateClickHint('Now click the map to set <b>End</b> destination');
+    clickState = 1;
+  } else {
+    setState('end', lat, lon, `Pin (${lat}, ${lon})`);
+    updateClickHint('Click map again to reset <b>Start</b>');
+    clickState = 0;
+  }
+  refreshMarkers();
+});
+
+function setState(which, lat, lon, label) {
+  state[which] = { lat, lon };
+  const input = document.getElementById(`${which}-search`);
+  input.value = label;
+  document.getElementById(`${which}-clear`).style.display = 'block';
+}
+
+function updateClickHint(html) {
+  document.getElementById('click-hint-text').innerHTML = html;
+}
+
+// ============================================================
+// 3. PLACE SEARCH — Nominatim (OpenStreetMap, free, no key)
+// ============================================================
+const debounceTimers = {};
+
+function onSearchInput(input, which) {
+  const val = input.value.trim();
+  document.getElementById(`${which}-clear`).style.display = val ? 'block' : 'none';
+
+  clearTimeout(debounceTimers[which]);
+  if (val.length < 2) { closeDropdown(which); return; }
+
+  debounceTimers[which] = setTimeout(() => geocodeNominatim(val, which), 320);
+}
+
+function onSearchFocus(which) {
+  const val = document.getElementById(`${which}-search`).value.trim();
+  if (val.length >= 2) geocodeNominatim(val, which);
+}
+
+async function geocodeNominatim(query, which) {
+  const dropdown = document.getElementById(`${which}-dropdown`);
+  dropdown.innerHTML = `<div class="autocomplete-loading"><div class="mini-spinner"></div> Searching…</div>`;
+  dropdown.style.display = 'block';
+
+  try {
+    // Nominatim search — biased toward Delhi with viewbox for relevance
+    const url = `https://nominatim.openstreetmap.org/search?` +
+      `q=${encodeURIComponent(query)}` +
+      `&format=json&limit=6&addressdetails=1` +
+      `&viewbox=76.8,28.4,77.5,28.9&bounded=0`;
+
+    const res = await fetch(url, {
+      headers: { 'Accept-Language': 'en', 'User-Agent': 'SafePath-Routing-App/1.0' }
+    });
+    const results = await res.json();
+
+    if (!results.length) {
+      dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#e87070;">No places found — try a different name</div>`;
+      return;
+    }
+
+    dropdown.innerHTML = '';
+    results.forEach(place => {
+      const mainName = place.namedetails?.name || place.display_name.split(',')[0];
+      const subName  = place.display_name.split(',').slice(1, 3).join(',').trim();
+      const item = document.createElement('div');
+      item.className = 'autocomplete-item';
+      item.innerHTML = `
+        <svg class="autocomplete-item-icon" width="14" height="14" viewBox="0 0 24 24" fill="none"
+          stroke="currentColor" stroke-width="2" stroke-linecap="round" stroke-linejoin="round">
+          <path d="M20 10c0 6-8 12-8 12S4 16 4 10a8 8 0 0 1 16 0Z"/><circle cx="12" cy="10" r="3"/>
+        </svg>
+        <div class="autocomplete-item-text">
+          <span class="autocomplete-item-main">${mainName}</span>
+          <span class="autocomplete-item-sub">${subName}</span>
+        </div>`;
+      item.addEventListener('mousedown', () => {
+        selectPlace(which, parseFloat(place.lat), parseFloat(place.lon), mainName);
+      });
+      dropdown.appendChild(item);
+    });
+  } catch (err) {
+    dropdown.innerHTML = `<div class="autocomplete-loading" style="color:#e87070;">Search unavailable</div>`;
+  }
+}
+
+function selectPlace(which, lat, lon, name) {
+  setState(which, lat, lon, name);
+  closeDropdown(which);
+  refreshMarkers();
+  map.setView([lat, lon], Math.max(map.getZoom(), 15));
+}
+
+function clearSearch(which) {
+  state[which] = { lat: null, lon: null };
+  document.getElementById(`${which}-search`).value = '';
+  document.getElementById(`${which}-clear`).style.display = 'none';
+  closeDropdown(which);
+  refreshMarkers();
+}
+
+function closeDropdown(which) {
+  document.getElementById(`${which}-dropdown`).style.display = 'none';
+}
+
+function closeAllDropdowns() {
+  closeDropdown('start');
+  closeDropdown('end');
+}
+
+// Close dropdowns when clicking outside
+document.addEventListener('mousedown', (e) => {
+  ['start', 'end'].forEach(which => {
+    const field = document.getElementById(`${which}-field`);
+    if (!field.contains(e.target)) closeDropdown(which);
+  });
+});
+
+// ============================================================
+// 4. DELHI DEMO PRESETS
+// ============================================================
+const PRESETS = {
+  lodi_khan: {
+    start: { lat: 28.5931, lon: 77.2199, name: 'Lodi Garden, New Delhi' },
+    end:   { lat: 28.6005, lon: 77.2272, name: 'Khan Market, New Delhi' },
+    center: [28.5968, 77.2235], zoom: 15
+  },
+  india_gate: {
+    start: { lat: 28.6129, lon: 77.2295, name: 'India Gate, New Delhi' },
+    end:   { lat: 28.6315, lon: 77.2167, name: 'Connaught Place, New Delhi' },
+    center: [28.6220, 77.2231], zoom: 14
+  },
+  du_kashmiri: {
+    start: { lat: 28.6880, lon: 77.2150, name: 'Delhi University North Campus' },
+    end:   { lat: 28.6675, lon: 77.2286, name: 'Kashmiri Gate Metro Station' },
+    center: [28.6778, 77.2218], zoom: 14
+  }
+};
+
+function applyPreset(key) {
+  const p = PRESETS[key];
+  if (!p) return;
+  setState('start', p.start.lat, p.start.lon, p.start.name);
+  setState('end',   p.end.lat,   p.end.lon,   p.end.name);
+  map.setView(p.center, p.zoom);
+  refreshMarkers();
+  requestRoute();
+}
+
+// ============================================================
+// 5. API CALL & ROUTE RENDERING
+// ============================================================
+async function requestRoute() {
+  const { lat: sLat, lon: sLon } = state.start;
+  const { lat: eLat, lon: eLon } = state.end;
+
+  const btn        = document.getElementById('calculate-btn');
+  const btnText    = document.getElementById('btn-text');
+  const errBanner  = document.getElementById('error-banner');
+  const statusTag  = document.getElementById('status-tag');
+
+  errBanner.style.display = 'none';
+
+  if (sLat == null || eLat == null) {
+    showError('Please set both Start and End locations first (search or click the map).');
+    return;
+  }
+
+  // Loading state
+  btn.disabled = true;
+  btnText.textContent = 'Calculating… (Fetching OSM Data)';
+  document.getElementById('btn-icon').outerHTML =
+    '<div class="spinner" id="btn-icon"></div>';
+  statusTag.textContent = 'Computing Graph…';
+
+  try {
+    const res = await fetch('/api/route', {
+      method: 'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body: JSON.stringify({ start_lat: sLat, start_lon: sLon, end_lat: eLat, end_lon: eLon })
+    });
+    const data = await res.json();
+    if (!res.ok) throw new Error(data.detail || `HTTP ${res.status}`);
+
+    // ── Render ──
+    hazardLayer.clearLayers();
+    routeLayer.clearLayers();
+    refreshMarkers();
+
+    // Hazard zones (red circles)
+    (data.hazard_zones || []).forEach(hz => {
+      L.circle([hz.lat, hz.lon], {
+        radius: hz.radius, color: 'red',
+        fillColor: '#f03', fillOpacity: 0.3, weight: 2
+      }).bindTooltip(
+        `<b style="color:#ef4444">AQI Hazard Zone</b><br>AQI ${hz.aqi} | r=${hz.radius}m`,
+        { sticky: true }
+      ).addTo(hazardLayer);
+    });
+
+    // Standard route — dashed blue
+    if (data.standard_route?.length)
+      L.polyline(data.standard_route, {
+        color: '#60a5fa', dashArray: '6, 10', weight: 4, opacity: 0.85
+      }).addTo(routeLayer);
+
+    // SafePath route — solid neon green
+    if (data.safepath_route?.length)
+      L.polyline(data.safepath_route, {
+        color: '#00ff88', weight: 6, opacity: 0.95,
+        lineJoin: 'round', lineCap: 'round'
+      }).addTo(routeLayer);
+
+    // Fit bounds
+    const bounds = L.latLngBounds();
+    [...(data.standard_route||[]), ...(data.safepath_route||[])].forEach(pt => bounds.extend(pt));
+    (data.hazard_zones||[]).forEach(hz => bounds.extend([hz.lat, hz.lon]));
+    if (bounds.isValid()) map.fitBounds(bounds, { padding: [60, 60], maxZoom: 17 });
+
+    // ── Metrics Display ──
+    const sm = data.metrics.standard;
+    const sp = data.metrics.safepath;
+
+    document.getElementById('safepath-output').innerHTML =
+      `${sp.distance_km} km | Exposure: ${sp.exposure}`;
+    document.getElementById('standard-output').innerHTML =
+      `${sm.distance_km} km | Exposure: ${sm.exposure}`;
+
+    const diff = (sp.distance_km - sm.distance_km).toFixed(2);
+    const pct  = sm.distance_km > 0
+      ? Math.round(((sp.distance_km - sm.distance_km) / sm.distance_km) * 100)
+      : 0;
+
+    const deltaBox = document.getElementById('delta-box');
+    deltaBox.style.display = 'block';
+    document.getElementById('delta-summary').innerHTML =
+      ` SafePath added <span class="delta-highlight">+${diff} km (+${pct}%)</span>
+        to avoid hazard zones, reducing exposure from
+        <span style="color:var(--accent-red);font-weight:700;">${sm.exposure}</span> →
+        <span style="color:var(--accent-green-neon);font-weight:700;">${sp.exposure}</span>.`;
+
+    statusTag.textContent = 'Routes Generated';
+
+  } catch (err) {
+    console.error(err);
+    showError(err.message || 'Routing engine error. Check the server is running.');
+    statusTag.textContent = 'Error';
+  } finally {
+    btn.disabled = false;
+    btnText.textContent = 'Calculate Routes';
+    const spinner = document.getElementById('btn-icon');
+    if (spinner) spinner.outerHTML = `
+      <svg id="btn-icon" width="17" height="17" viewBox="0 0 24 24" fill="none"
+        stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round">
+        <polygon points="3 11 22 2 13 21 11 13 3 11"/>
+      </svg>`;
+  }
+}
+
+function showError(msg) {
+  const b = document.getElementById('error-banner');
+  b.textContent = msg;
+  b.style.display = 'block';
+}
+</script>
+</body>
+</html>
