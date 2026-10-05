@@ -55,8 +55,71 @@ osmnx._http._config_dns = lambda url: None
 
 BASE_DIR = os.path.dirname(os.path.abspath(__file__))
 CACHE_DIR = os.path.join(BASE_DIR, "cache")
+ASSETS_DIR = os.path.join(BASE_DIR, "assets")
 os.makedirs(CACHE_DIR, exist_ok=True)
+os.makedirs(ASSETS_DIR, exist_ok=True)
 logger.info(f"OSMnx cache directory: {CACHE_DIR}")
+
+BUNDLED_GRAPH_PATH = os.path.join(ASSETS_DIR, "delhi_central_walk.graphml")
+BUNDLED_GRAPH_BBOX: Tuple[float, float, float, float] | None = None
+_BUNDLED_GRAPH_CACHE: nx.MultiDiGraph | None = None
+_BUNDLED_GRAPH_LOAD_ERROR: str | None = None
+
+
+def _load_bundled_graph() -> nx.MultiDiGraph | None:
+    """
+    Load the pre-built Delhi-central pedestrian GraphML file from disk (if present).
+    Once loaded, the graph is cached in memory and reused for all route requests
+    whose bounding box fits inside the pre-built area.
+
+    This approach completely avoids runtime Overpass API calls, which are blocked
+    by default on some PaaS providers (e.g., Render free tier).
+    """
+    global _BUNDLED_GRAPH_CACHE, _BUNDLED_GRAPH_LOAD_ERROR, BUNDLED_GRAPH_BBOX
+
+    if _BUNDLED_GRAPH_CACHE is not None:
+        return _BUNDLED_GRAPH_CACHE
+    if _BUNDLED_GRAPH_LOAD_ERROR is not None:
+        return None
+
+    if not os.path.isfile(BUNDLED_GRAPH_PATH):
+        _BUNDLED_GRAPH_LOAD_ERROR = "not_present"
+        logger.info(
+            f"No bundled graph at {BUNDLED_GRAPH_PATH}. Falling back to live Overpass downloads."
+        )
+        return None
+
+    try:
+        t0 = time.time()
+        G = ox.load_graphml(BUNDLED_GRAPH_PATH)
+        elapsed = time.time() - t0
+
+        xs = [d["x"] for _, d in G.nodes(data=True)]
+        ys = [d["y"] for _, d in G.nodes(data=True)]
+        BUNDLED_GRAPH_BBOX = (min(xs), min(ys), max(xs), max(ys))
+        _BUNDLED_GRAPH_CACHE = G
+
+        logger.info(
+            f"Bundled graph loaded in {elapsed:.1f}s — {len(G)} nodes, {G.number_of_edges()} edges. "
+            f"BBOX (min_lon, min_lat, max_lon, max_lat) = {BUNDLED_GRAPH_BBOX}"
+        )
+        return G
+    except Exception as exc:
+        _BUNDLED_GRAPH_LOAD_ERROR = str(exc)
+        logger.warning(f"Failed to load bundled graph {BUNDLED_GRAPH_PATH}: {exc}")
+        return None
+
+
+def _bbox_inside_outer(inner_bbox, outer_bbox) -> bool:
+    """Return True if inner (min_lon, min_lat, max_lon, max_lat) is fully inside outer."""
+    in_min_lon, in_min_lat, in_max_lon, in_max_lat = inner_bbox
+    out_min_lon, out_min_lat, out_max_lon, out_max_lat = outer_bbox
+    return (
+        in_min_lon >= out_min_lon
+        and in_max_lon <= out_max_lon
+        and in_min_lat >= out_min_lat
+        and in_max_lat <= out_max_lat
+    )
 
 # ==============================================================================
 # Overpass API endpoint fallback list.
@@ -194,12 +257,11 @@ def fetch_pedestrian_graph(
     buffer_meters: float = 150.0,
 ) -> nx.MultiDiGraph:
     """
-    Download a pedestrian street network graph from OpenStreetMap bounded by
-    the start/end coordinates plus a buffer.
-
-    Cycles through a list of public Overpass API endpoints (mirrors) because
-    some PaaS providers (Render free tier, etc.) block the default
-    overpass-api.de host at the network level.
+    Resolve a pedestrian street network graph bounded by the start/end coordinates
+    plus a buffer, preferring a pre-built bundled GraphML file (if present) for the
+    requested bounding box fits inside). If no bundled graph covers the area OR the bbox
+    is outside the pre-built region, fall back to live Overpass API downloads
+    across a list of public mirrors.
     """
     buffer_deg_lat = buffer_meters / 111320.0
     avg_lat = (start_lat + end_lat) / 2.0
@@ -211,9 +273,41 @@ def fetch_pedestrian_graph(
     max_lon = max(start_lon, end_lon) + buffer_deg_lon
 
     bbox = (min_lon, min_lat, max_lon, max_lat)
-    logger.info(f"Downloading walk network for bounding box: {bbox}")
+    logger.info(f"Request bbox (min_lon, min_lat, max_lon, max_lat) = {bbox}")
     t0 = time.time()
 
+    # ------------------------------------------------------------------
+    # 1) Try bundled, in-memory prebuilt graph FIRST (zero network I/O, instant)
+    # ------------------------------------------------------------------
+    G_big = _load_bundled_graph()
+    if G_big is not None and BUNDLED_GRAPH_BBOX is not None:
+        if _bbox_inside_outer(bbox, BUNDLED_GRAPH_BBOX):
+            try:
+                G_cut = ox.truncate.truncate_graph_bbox(
+                    G_big,
+                    bbox=(bbox[3], bbox[1], bbox[2], bbox[0]),
+                )
+                if len(G_cut) == 0:
+                    logger.warning("Bundled graph truncation returned empty graph; falling back to Overpass")
+                else:
+                    elapsed = time.time() - t0
+                    logger.info(
+                        f"✅ Using bundled Delhi graph (no network) — "
+                        f"subgraph has {len(G_cut)} nodes, {G_cut.number_of_edges()} edges "
+                        f"in {elapsed:.2f}s"
+                    )
+                    return G_cut
+            except Exception as exc:
+                logger.warning(f"Bundled graph truncate failed: {exc}. Falling back to Overpass.")
+        else:
+            logger.warning(
+                f"Requested bbox is outside bundled Delhi pre-built graph bbox {BUNDLED_GRAPH_BBOX}. "
+                f"Falling back to Overpass."
+            )
+
+    # ------------------------------------------------------------------
+    # 2) Live Overpass download (mirror cycling with retries)
+    # ------------------------------------------------------------------
     last_exc: Exception | None = None
     retries_per_endpoint = 2
 
@@ -239,7 +333,7 @@ def fetch_pedestrian_graph(
                 last_exc = exc
                 is_conn_err = any(
                     kw in str(exc).lower()
-                    for kw in ("unreachable", "connection", "timed out", "newconnectionerror", "max retries")
+                    for kw in ("unreachable", "connection", "timed out", "newconnectionerror", "max retries", "refused")
                 )
                 logger.warning(
                     f"  Endpoint {endpoint} attempt {attempt}/{retries_per_endpoint} failed: {exc}"
@@ -250,10 +344,16 @@ def fetch_pedestrian_graph(
                 if attempt < retries_per_endpoint:
                     time.sleep(attempt * 3)
 
+    bundled_missing_hint = (
+        " NOTE: This environment cannot reach public Overpass servers. "
+        f"Run `python3 scripts/generate_delhi_graph.py` locally, "
+        "commit `assets/delhi_central_walk.graphml`, and redeploy to enable zero-network routing."
+        if G_big is None else ""
+    )
     all_endpoints_str = ", ".join(OVERPASS_ENDPOINTS)
     raise ValueError(
         f"Unable to retrieve street network data. Tried all {len(OVERPASS_ENDPOINTS)} "
-        f"Overpass endpoints ({all_endpoints_str}). Last error: {last_exc}"
+        f"Overpass endpoints ({all_endpoints_str}). Last error: {last_exc}. {bundled_missing_hint}"
     )
 
 
